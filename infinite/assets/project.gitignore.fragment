@@ -1,7 +1,12 @@
-# Enforcement state for the `infinite` skill - machine-local, never commit.
+# Infinite scratch state and user-owned enforcement state - machine-local.
 .openhands/guard/
 .infinite/
 
-# Optional: hook wiring is usually committed so the user's setting persists.
-# Remove this line if you want the wiring committed too.
+# Generated hook wiring may be committed for OpenHands Cloud portability.
+# Hook commands must stay repo-relative; never commit secrets in a policy.
 # .openhands/hooks/
+# .openhands/hooks.json
+
+# Research deliverables are intentionally NOT ignored:
+# research/book-of-mormon-for.md
+# research/book-of-mormon-against.md

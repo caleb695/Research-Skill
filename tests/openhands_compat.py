@@ -25,6 +25,7 @@ sdk/hooks/config.py, sdk/hooks/executor.py, sdk/conversation/...):
     * each entry is {matcher, hooks: [{type, command, timeout}]}
     * exit code 2 (or {"decision":"deny"}) blocks
     * a Stop hook that blocks sets the run back to RUNNING
+    * command hooks run with cwd=working_dir; committed commands stay repo-relative
     * the agent receives `additionalContext`; the Stop path forwards nothing else
 
 Usage: python3 tests/openhands_compat.py [--project DIR]
@@ -224,6 +225,16 @@ def main() -> int:
     else:
         print("  --   no root SKILL.md (skill installs via .agents/skills/ only)")
 
+    print("== Cloud project launcher ==")
+    launcher = REPO / ".agents" / "skills" / "infinite" / "SKILL.md"
+    check(launcher.is_file(), "standard .agents/skills/infinite/SKILL.md entry point exists")
+    if launcher.is_file():
+        launch_meta, launch_body = parse_frontmatter(launcher.read_text(encoding="utf-8"))
+        check(launch_meta.get("name") == "infinite", "launcher name matches its directory")
+        check(isinstance(launch_meta.get("triggers"), list), "launcher has keyword triggers")
+        check("infinite/SKILL.md" in launch_body, "launcher points to the canonical package")
+        check("paths" not in launch_meta, "launcher does not shadow triggers with paths")
+
     print("== command shim ==")
     shim = SKILL_DIR / "commands" / "infinite.md"
     if shim.is_file():
@@ -292,9 +303,25 @@ def main() -> int:
     stop_cmd = config["stop"][0]["hooks"][0]["command"]
     check("--policy" in stop_cmd, "Stop hook carries the immutable policy")
     check(
-        stop_cmd.strip().startswith("/"),
-        "Stop hook uses an absolute script path",
-        stop_cmd[:60],
+        stop_cmd.startswith("bash .openhands/hooks/"),
+        "Stop hook uses a portable repo-relative command",
+        stop_cmd[:80],
+    )
+    check(
+        str(project) not in stop_cmd,
+        "Stop hook does not bake in the installer's checkout path",
+        stop_cmd[:80],
+    )
+    gate_timeout = sum(
+        int(g.get("timeout", 600))
+        for entry in config["stop"] for h in entry["hooks"]
+        for g in json.loads(__import__("base64").urlsafe_b64decode(
+            h["command"].split("--policy ", 1)[1].strip("'") + "==="
+        )).get("gates", [])
+    )
+    check(
+        config["stop"][0]["hooks"][0]["timeout"] > gate_timeout,
+        "Stop hook timeout exceeds the configured gate budget",
     )
 
     def run(cmd: str, payload: dict, env_extra: dict | None = None) -> tuple[int, str]:
@@ -307,7 +334,7 @@ def main() -> int:
             input=json.dumps(payload),
             capture_output=True,
             text=True,
-            cwd="/",  # hooks run from an arbitrary cwd
+            cwd=project,  # current SDK executor uses cwd=working_dir
             env=env,
             timeout=120,
         )
