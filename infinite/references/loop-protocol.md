@@ -1,9 +1,9 @@
 # Loop protocol — durable state for long research runs
 
-Keep the loop in files so context compaction, a new conversation, or an iteration
-cap does not erase findings. For Book of Mormon research, follow this protocol
-with `book-of-mormon-research.md` and `evidence-schema.md`; for other tasks use
-the generic audit/improve/verify round.
+Keep the fixed-task loop in files so context compaction, a new conversation, or an
+iteration cap does not erase findings. This skill runs only the prompt in
+`fixed-task.md`; follow this protocol with `book-of-mormon-research.md` and
+`evidence-schema.md`.
 
 ## Where state lives
 
@@ -20,6 +20,7 @@ the generic audit/improve/verify round.
 ├── config.json       mirror of the loaded policy
 ├── attempts.json     finish-attempt history
 ├── DISARMED          generic stop or user override
+├── ARMED             standby hooks armed by a real fixed invocation
 ├── STOP_REQUESTED    research stop; final reports still required
 └── events.jsonl      arm/disarm/deny audit trail
 ```
@@ -75,12 +76,14 @@ A round record looks like:
 
 Append only. Never rewrite history to look better. If a source was wrong, append
 a revision and keep the rejected/corrected trail. Do not log a check you did not
-perform. If scripts are unavailable, maintain the same fields by hand and keep
-the two reports current; do not silently drop findings.
+perform. With enforcement hooks installed, ledger/report writes must go through
+the validating helpers; hand edits are denied. If scripts are unavailable and no
+hooks are installed, maintain the same fields by hand and keep the two reports
+current; do not silently drop findings.
 
 ## Resuming
 
-On `continue`, `/infinite`, compaction, or a new run:
+On `continue`, `resume`, `use this skill`, `/infinite`, compaction, or a new run:
 
 1. Read `state.json`, recent ledger events, and both reports.
 2. Run the research validator; repair stale reports or broken references from the
@@ -109,8 +112,8 @@ supported from the conversation and mark uncertain reconstructions explicitly.
    resume instructions. This is the one time a final summary is appropriate.
 5. A later explicit continue resumes from the ledger; it does not erase history.
 
-For a generic non-research task, a stop disarms immediately; finish the atomic
-step, run checks, and summarize. Never try to disarm research enforcement yourself.
+Never try to disarm research enforcement yourself. A stop ends research and moves
+to final-report compilation, not to a different task.
 
 ## Checkpoints and anti-patterns
 

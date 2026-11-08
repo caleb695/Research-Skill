@@ -185,9 +185,22 @@ def main() -> int:
             "/infinite" in triggers,
             "slash-command trigger '/infinite' present (whole-token match)",
         )
+        check(
+            "use this skill" in triggers,
+            "minimal fixed-task trigger 'use this skill' present",
+        )
         non_ascii = [t for t in triggers if not t.isascii()]
         check(not non_ascii, "triggers are ASCII (safe whole-token matching)", str(non_ascii))
     check(bool(body.strip()), "body content is present after the frontmatter")
+    fixed_task = SKILL_DIR / "references" / "fixed-task.md"
+    check(fixed_task.is_file(), "authoritative fixed-task prompt is bundled")
+    if fixed_task.is_file():
+        fixed_text = fixed_task.read_text(encoding="utf-8")
+        check("indefinitely research online for evidence for and against the Book of Mormon" in fixed_text,
+              "fixed prompt contains the original research task")
+        check("When I say stop" in fixed_text, "fixed prompt contains the original stop/report instruction")
+    check("generic audit" not in body and "unrelated coding task" not in body,
+          "canonical skill does not fall back to generic unrelated work")
 
     print("== unknown frontmatter keys are harmless ==")
     known = {
@@ -244,6 +257,9 @@ def main() -> int:
             (not has_header) or bool(shim_meta.get("description")),
             "command file starts with a valid header or none at all",
         )
+        shim_text = shim.read_text(encoding="utf-8")
+        check("$ARGUMENTS" not in shim_text, "command shim does not substitute arguments as the task")
+        check("fixed-task.md" in shim_text, "command shim points to the fixed prompt")
 
     project = Path(args.project).resolve() if args.project else None
     if project is None:
@@ -253,7 +269,7 @@ def main() -> int:
         project.mkdir()
         install = SKILL_DIR / "scripts" / "install-openhands-hooks.sh"
         proc = subprocess.run(
-            ["bash", str(install), "--dir", str(project), "--gate", "tests:true"],
+            ["bash", str(install), "--dir", str(project), "--generic", "--gate", "tests:true"],
             capture_output=True,
             text=True,
         )
@@ -373,6 +389,9 @@ def main() -> int:
     check(code == 0, "a real 'stop' message lets the finish through", str(code))
 
     pre_cmd = config["pre_tool_use"][0]["hooks"][0]["command"]
+    check("--policy" in pre_cmd, "PreToolUse hook carries the immutable policy")
+    prompt_cmd = config["user_prompt_submit"][0]["hooks"][0]["command"]
+    check("--policy" in prompt_cmd, "UserPromptSubmit hook carries the immutable policy")
     deny_payload = {
         "event_type": "PreToolUse",
         "tool_name": "terminal",

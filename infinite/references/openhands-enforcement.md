@@ -15,9 +15,12 @@ cannot change decide whether a run may finish.
 ## Install
 
 ```bash
-bash infinite/scripts/install-openhands-hooks.sh --dir /path/to/project
-# Book of Mormon research profile + report validator:
-bash infinite/scripts/install-openhands-hooks.sh --dir /path/to/project --research --install-skill
+# Book of Mormon research profile + built-in validator (default):
+bash infinite/scripts/install-openhands-hooks.sh --dir /path/to/project --install-skill
+# Standby hooks; arm by saying "use this skill" / "/infinite":
+bash infinite/scripts/install-openhands-hooks.sh --dir /path/to/project --install-skill --no-arm
+# Legacy generic infinite loop only:
+bash infinite/scripts/install-openhands-hooks.sh --dir /path/to/project --generic
 ```
 
 Add `--install-skill` to also place the skill at `.agents/skills/infinite/`
@@ -30,7 +33,8 @@ That single command:
    cannot disable enforcement);
 2. copies three thin hook scripts into `.openhands/hooks/`;
 3. **embeds the policy** — profile, mode, gates, required rounds — as a base64
-   blob in the Stop hook command inside `.openhands/hooks.json`;
+   blob in the Stop, PreToolUse, and UserPromptSubmit hook commands inside
+   `.openhands/hooks.json`;
 4. preserves any existing hook entries and never duplicates its own.
 
 ```json
@@ -41,7 +45,7 @@ That single command:
     ]}
   ],
   "pre_tool_use": [
-    { "matcher": "*", "hooks": [{ "command": "bash .openhands/hooks/infinite-pretool.sh", "timeout": 20 }] }
+    { "matcher": "*", "hooks": [{ "command": "bash .openhands/hooks/infinite-pretool.sh --policy eyJ2IjoyLCJwcm9maWxlIjoi...", "timeout": 20 }] }
   ],
   "user_prompt_submit": [
     { "matcher": "*", "hooks": [{ "command": "bash .openhands/hooks/infinite-userprompt.sh --policy eyJ2IjoyLCJwcm9maWxlIjoi...", "timeout": 15 }] }
@@ -56,12 +60,13 @@ cannot do is change the hook command of the **running** conversation: OpenHands
 loads `hooks.json` when the conversation starts. So the policy travels on the
 command line, and the on-disk `config.json` is only a mirror for `status`.
 
-The Stop hook forwards `"$@"` (the policy) to the guard. If the policy argument
-is present but unreadable, the guard **fails closed** — it never falls back to a
-file the agent could have written. Hook commands are repo-relative because the
-SDK executor runs them with cwd set to the conversation working folder; this is
-portable across OpenHands Cloud checkout paths. The Stop hook timeout is derived
-from the configured gate budgets so a gate cannot outlive its hook.
+The Stop, PreToolUse, and UserPromptSubmit hooks forward `"$@"` (the policy) to
+the guard. If the policy argument is present but unreadable, the guard **fails closed** — it never
+falls back to a file the agent could have written. Hook commands are repo-relative
+because the SDK executor runs them with cwd set to the conversation working
+folder; this is portable across OpenHands Cloud checkout paths. The Stop hook
+timeout is derived from the configured gate budgets plus the built-in research
+validator so a gate cannot outlive its hook.
 
 ## The three hooks
 
@@ -89,8 +94,9 @@ Modes (`--mode`):
 | Mode | Allows a finish when |
 | --- | --- |
 | `required` (default) | Never while active. Each finish attempt becomes the next round. In the research profile, a user stop switches to final-report validation instead |
+| `standby` | Installed but unarmed; a real `use this skill` / `/infinite` message arms it. After final reports pass, it returns to standby |
 | `allow-when-green` | Every gate passes **and** a newly verified round was logged |
-| `always` | Never, and gates are not evaluated (cheapest) |
+| `always` | Never; configured gates are skipped for generic work, but the research profile still runs its built-in validator |
 | `disabled` | Installed but off |
 
 ### `pre_tool_use` — the agent cannot switch it off
@@ -101,7 +107,11 @@ Denied outright:
 - `rm`, `mv`, `sed -i`, `chmod`, `tee`, `>` and friends aimed at `.openhands`
   or any `infinite*` file;
 - reading `.openhands/guard` state;
-- editing `.openhands/hooks.json` or the guard through a file tool.
+- editing `.openhands/hooks.json` or the guard through a file tool;
+- in the research profile, hand-editing `.infinite/ledger.jsonl`,
+  `.infinite/state.json`, the generated reports, or the validating helpers;
+- in the research profile, `compile --final` before a real user stop, or
+  agent-side `arm`/`disarm`/`resume` after a stop until the user continues.
 
 Still allowed: tests, builds, commits, ordinary file edits, and documentation
 that merely *mentions* these paths (the rule is path-based for file tools,
@@ -120,9 +130,10 @@ an agent-editable state mirror.
   `STOP_REQUESTED` instead of immediately disarming: research ends, but finishing
   waits for both final reports to pass the configured gates. The user can still
   override with the installer's `--disarm`.
-- **Arms:** `/infinite`, `/forever`, `/never-stop`, "never stop", "keep going",
-  "infinite mode", "until I say stop", "indefinitely research". Re-arming clears
-  a prior `STOP_REQUESTED`; the agent then resumes from the ledger.
+- **Arms:** `use this skill`, `use infinite`, `use the infinite skill`, `/infinite`,
+  and legacy infinite phrases such as "never stop" or "until I say stop".
+  Re-arming clears a prior `STOP_REQUESTED`; the agent then resumes the fixed
+  prompt from the ledger.
 - **Ignored:** prose and questions — "add a stop button to the UI", "how does the
   stop hook work?", "why did the build stop?" — so normal work does not
   accidentally end the loop.
@@ -159,8 +170,9 @@ echo '{"event_type":"Stop","working_dir":"'"$PWD"'"}' \
 `tests/smoke.sh` automates the enforcement checks (including nine attack
 attempts); `tests/openhands_compat.py` verifies the loader and hook contract
 above with the SDK's payload shape and working-directory rule; and
-`tests/test_research.py` checks research finalization plus a relocated Cloud-style
-checkout. These are local contract tests, not a live hosted Cloud run.
+`tests/test_research.py` checks research scoring/finalization, helper-only
+writes, built-in validation with no shell gates, standby arming, and a relocated
+Cloud-style checkout. These are local contract tests, not a live hosted Cloud run.
 
 ## Verified against the OpenHands SDK source
 
@@ -183,12 +195,15 @@ by `tests/openhands_compat.py`:
 
 ## Research profile
 
-`--research` embeds `profile: book-of-mormon`, copies the stdlib research helper
-beside the hooks, adds a `research` validation gate, and initializes the two
-working reports. Deny context names the next for/against side and the evidence
-protocol instead of generic coding work. A user stop creates `STOP_REQUESTED`;
-the gate then requires `compile --final` reports whose ledger digest is current.
-It never asks for another research round after that stop. See
+The installer enables `profile: book-of-mormon` by default, copies the stdlib
+research helper beside the hooks, and initializes the two working reports. The
+Stop hook itself runs a built-in `research-validator` gate; it is not a removable
+shell gate, so `--no-gates` and `mode=always` still enforce the fixed task. Deny
+context names the next for/against side and the evidence protocol instead of
+generic coding work. A user stop creates `STOP_REQUESTED`; the gate then requires
+`compile --final` reports whose ledger digest is current. PreToolUse makes the
+ledger/report/helper writes helper-only and blocks premature finalization. It
+never asks for another research round after that stop. See
 [`openhands-cloud.md`](openhands-cloud.md) and [`evidence-schema.md`](evidence-schema.md).
 
 ## What enforcement still cannot do

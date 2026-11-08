@@ -1,31 +1,24 @@
 ---
 name: ai-infinite-skill
 description: >-
-  Repository entry point for Infinite's Book of Mormon evidence-research loop.
-  Use when asked to research evidence for and against the Book of Mormon until
-  the user says stop, with source authentication, full context/POV checks,
-  alternating for/against rounds, one overall evidence score, deduplication,
-  cross-side evaluation, and two ranked final reports. Also supports the generic
-  infinite audit/improve/verify loop for unrelated tasks.
+  Repository entry point for a single-purpose Infinite skill. Use when the user
+  says "use this skill", "use infinite", "use the infinite skill", or "/infinite".
+  It runs one fixed bundled Book of Mormon evidence-research prompt without
+  requiring task arguments: source authentication, context/POV checks, alternating
+  for/against rounds, one overall evidence score, deduplication, cross-side
+  evaluation, and two ranked final reports on stop. It does not accept a
+  replacement task.
 triggers:
+- use this skill
+- use the infinite skill
+- use infinite skill
+- use infinite
 - /infinite
-- /forever
-- /never-stop
-- never stop
-- don't stop
-- do not stop
-- keep going
-- keep improving
-- infinite mode
-- work forever
-- until I say stop
-- indefinitely research
-- Book of Mormon
 license: MIT
 compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Canonical package is infinite/; project discovery launcher is .agents/skills/infinite/SKILL.md.
 metadata:
   author: caleb695
-  version: "1.1.0"
+  version: "1.3.0"
   canonical: infinite/SKILL.md
 ---
 
@@ -37,9 +30,12 @@ file is a pointer for clients that read a repository-level skill; OpenHands
 project discovery uses [`.agents/skills/infinite/SKILL.md`](.agents/skills/infinite/SKILL.md),
 which launches the same canonical package.
 
-## Research contract in brief
+## Fixed-task contract in brief
 
-For Book of Mormon evidence requests:
+The user only has to say `use this skill`, `use infinite`, `use the infinite
+skill`, or `/infinite`. The authoritative task is
+[`infinite/references/fixed-task.md`](infinite/references/fixed-task.md); arguments
+do not replace it. Then:
 
 1. Initialize the durable research ledger and two working reports.
 2. Alternate **for → against → for → against** rounds until an explicit user stop.
@@ -62,26 +58,31 @@ its historicity. Historically documented spiritual experiences are evidence of
 reported belief/experience, not automatic public verification of a supernatural
 cause.
 
-For unrelated tasks, follow the canonical skill's generic audit → improve →
-verify → log loop. Platform iteration/budget/network limits are checkpoint/resume
-boundaries, not permission to fabricate progress or override the user.
+Do not run unrelated tasks from this skill. Platform iteration/budget/network
+limits are checkpoint/resume boundaries, not permission to fabricate progress or
+override the user.
 
 ## Resources
 
 | Path | Purpose |
 | --- | --- |
 | [`infinite/SKILL.md`](infinite/SKILL.md) | Canonical round contract |
+| [`infinite/references/fixed-task.md`](infinite/references/fixed-task.md) | Authoritative fixed prompt |
 | [`infinite/references/book-of-mormon-research.md`](infinite/references/book-of-mormon-research.md) | Verification, context, scoring, categories, deepening |
 | [`infinite/references/evidence-schema.md`](infinite/references/evidence-schema.md) | Ledger records and helper commands |
 | [`infinite/references/loop-protocol.md`](infinite/references/loop-protocol.md) | Durable state, resume, stop/finalization |
 | [`infinite/references/openhands-cloud.md`](infinite/references/openhands-cloud.md) | Cloud loading, portable hooks, limits |
-| [`infinite/references/openhands-enforcement.md`](infinite/references/openhands-enforcement.md) | Optional user-owned enforcement |
+| [`infinite/references/openhands-enforcement.md`](infinite/references/openhands-enforcement.md) | Deterministic user-owned enforcement |
 
-Install the complete package and optional research enforcement with:
+Install the complete package with Book of Mormon enforcement enabled by default:
 
 ```bash
-bash infinite/scripts/install-openhands-hooks.sh --dir . --research --install-skill
+bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill
 ```
+
+The research side is enforced by hooks, not only by prose: a built-in Stop
+validator, helper-only ledger/report writes, and user-only stop/resume control.
+Use `--no-arm` to install standby hooks that arm on `use this skill`.
 
 Run installation before starting the OpenHands conversation. The agent must not
 edit or bypass user-owned enforcement. See the README for Cloud import options.

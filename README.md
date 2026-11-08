@@ -1,13 +1,20 @@
 # Research-Skill — Infinite evidence research
 
-An [Agent Skills](https://docs.openhands.dev/overview/skills) package specialized
-for one task: **research evidence for and against the Book of Mormon until the
-user says stop, then compile two ranked reports.** It keeps the original Infinite
-idea—never elect to finish early—but replaces generic code polishing with an
-evidence-first research loop when the task concerns the Book of Mormon.
+An [Agent Skills](https://docs.openhands.dev/overview/skills) package that runs
+**one fixed task only**: the complete Book of Mormon evidence-research prompt
+bundled in [`infinite/references/fixed-task.md`](infinite/references/fixed-task.md).
+The user should basically only have to say:
+
+```text
+use this skill
+```
+
+or `/infinite`. No long prompt or task arguments are required. The skill does not
+accept a replacement task and does not fall back to generic coding/improvement
+work.
 
 Compatible with OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and clients
-that read `SKILL.md`. Helpers use only the Python 3 standard library; optional
+that read `SKILL.md`. Helpers use only the Python 3 standard library;
 enforcement hooks use bash.
 
 ## What the research skill does
@@ -61,10 +68,10 @@ leads, search coverage, and original synthesis. Evidence shared by several claim
 is listed once and referenced by ID.
 
 Say **`stop`** to end research. The skill then stops searching and compiles both
-final reports from recorded findings. With optional research enforcement, the
-user-stop hook requests finalization and blocks finishing only until the reports
-are valid; it does not order more research. Say `continue` later to resume from
-the ledger at the next round and side.
+final reports from recorded findings. With research enforcement, the user-stop
+hook requests finalization and the built-in validator blocks finishing only until
+the reports are valid; it does not order more research. Say `continue` later to
+resume from the ledger at the next round and side.
 
 ## Install and use
 
@@ -72,21 +79,18 @@ the ledger at the next round and side.
 git clone https://github.com/caleb695/Research-Skill
 cd Research-Skill
 
-# Complete skill + research enforcement. Run before starting the conversation.
-bash infinite/scripts/install-openhands-hooks.sh --dir . --research --install-skill
+# Complete skill + Book of Mormon enforcement (default). Run before the conversation.
+bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill
 
-# Or install the skill without enforcement:
+# Or install standby hooks that arm when you say "use this skill":
 bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill --no-arm
 ```
 
 The self-contained package installs to `.agents/skills/infinite/`. Trigger it
-with a message such as:
+with only:
 
 ```text
-/infinite Research evidence for and against the Book of Mormon until I say stop.
-Verify each item is real, read the full context and POV, investigate deeply,
-rank credibility/accuracy/relevance/usefulness as one overall score, avoid
-repeats, alternate for and against, compare both sides, and keep two reports.
+use this skill
 ```
 
 ### OpenHands Cloud
@@ -126,12 +130,14 @@ The validator checks structure, scoring math, duplicate keys, references,
 alternation, and report freshness. It cannot authenticate history or guarantee
 that prose is fair; the recorded sources and checks are the audit trail.
 
-## Optional enforcement
+## Deterministic enforcement
 
-The user-owned guard installs Stop, PreToolUse, and UserPromptSubmit hooks. While
-active, the agent cannot elect to finish or disable enforcement. A research stop
-switches the gate to final-report validation. The user can always override from
-their own terminal:
+The Mormon side is not just prompting. The user-owned guard installs Stop,
+PreToolUse, and UserPromptSubmit hooks. The Stop hook has a built-in research
+validator that cannot be removed with `--no-gates`; PreToolUse requires
+helper-only ledger/report writes and blocks premature final reports; only a real
+user message can stop or resume. While active, the agent cannot elect to finish
+or disable enforcement. The user can always override from their own terminal:
 
 ```bash
 bash infinite/scripts/install-openhands-hooks.sh --dir . --status
@@ -164,7 +170,7 @@ Research-Skill/
 ├── infinite/                         canonical self-contained skill
 │   ├── SKILL.md
 │   ├── commands/infinite.md
-│   ├── references/                   research, schema, loop, Cloud, enforcement
+│   ├── references/                   fixed-task, research, schema, loop, Cloud, enforcement
 │   ├── scripts/                      ledger/state/guard/hooks/installer
 │   └── assets/
 ├── tests/smoke.sh                    generic enforcement/install checks

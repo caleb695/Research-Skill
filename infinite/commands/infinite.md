@@ -1,7 +1,7 @@
 ---
-description: Run the Infinite loop; for Book of Mormon requests, alternate verified for/against evidence rounds and compile two ranked reports only when the user says stop.
+description: Run the one fixed Book of Mormon evidence-research prompt bundled with this skill; no task arguments are required or accepted as a replacement task.
 ---
 
-Read and follow the complete instructions in the SKILL.md file located in this skill's directory, including the Book of Mormon research references when the task concerns Book of Mormon evidence.
+Read and follow the complete instructions in the SKILL.md file located in this skill's directory. Read `references/fixed-task.md` first and run that fixed prompt exactly.
 
-$ARGUMENTS
+Do not use command arguments as a new task. Honor only execution controls for the fixed task: stop/stop-research and compile final reports; continue/resume/use this skill to resume from the ledger. If arguments contain an unrelated request, state that this skill only runs its fixed prompt and continue or resume the fixed research unless the user says stop.
