@@ -59,6 +59,10 @@ front = match.group(1)
 assert re.search(r"^name: infinite$", front, re.M), "name must be 'infinite'"
 assert re.search(r"^description:", front, re.M), "description required"
 assert re.search(r"^triggers:", front, re.M), "triggers required"
+assert "use this skill" in front, "minimal fixed-task trigger required"
+from pathlib import Path
+skill = Path(sys.argv[1]).parent
+assert (skill / "references" / "fixed-task.md").is_file(), "fixed-task prompt must be bundled"
 print("  ok   frontmatter valid")
 PY
 [ "$(basename "$SKILL_DIR")" = "infinite" ] && pass "directory name matches skill name" || fail "directory name"

@@ -241,6 +241,7 @@ class ResearchTests(unittest.TestCase):
         proc = subprocess.run(["bash", str(INSTALL), "--dir", str(self.project), "--research", "--install-skill"], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertTrue((self.project / ".agents/skills/infinite/scripts/infinite_research.py").is_file())
+        self.assertTrue((self.project / ".agents/skills/infinite/references/fixed-task.md").is_file())
         config = json.loads((self.project / ".openhands/hooks.json").read_text())
         stop_cmd = config["stop"][0]["hooks"][0]["command"]
         self.assertTrue(stop_cmd.startswith("bash .openhands/hooks/"))
@@ -269,7 +270,8 @@ class ResearchTests(unittest.TestCase):
         self.run_py(RESEARCH, "compile", "--final")
         result = self.hook(self.project, "stop")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.hook(self.project, "prompt", "/infinite continue")
+        result = self.hook(self.project, "prompt", "use this skill")
+        self.assertEqual(result.returncode, 0)
         self.assertFalse((self.project / ".openhands/guard/STOP_REQUESTED").exists())
         self.run_py(STATE, "resume")
         # Simulate a Cloud clone at a different checkout path: no installed command
@@ -282,6 +284,10 @@ class ResearchTests(unittest.TestCase):
         proc = subprocess.run(["bash", str(INSTALL), "--dir", str(relocated), "--disarm"], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(self.hook(relocated, "stop").returncode, 0)
+        self.hook(relocated, "prompt", "do not use this skill")
+        self.assertEqual(self.hook(relocated, "stop").returncode, 0)
+        self.hook(relocated, "prompt", "use this skill")
+        self.assertEqual(self.hook(relocated, "stop").returncode, 2)
 
 
 if __name__ == "__main__":

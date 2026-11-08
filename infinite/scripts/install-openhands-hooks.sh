@@ -119,6 +119,7 @@ install_skill_files() {
     mkdir -p "$dest"
     local files=(
         SKILL.md README.md
+        references/fixed-task.md
         references/loop-protocol.md
         references/audit-playbook.md
         references/openhands-enforcement.md

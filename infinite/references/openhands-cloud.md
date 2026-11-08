@@ -38,10 +38,11 @@ Sources in the checked docs checkout:
 2. Start a conversation with this repository as the workspace, or import the
    `infinite/` directory as a Git-hosted skill. Enable/select `infinite` if the UI
    presents a skill catalog. Start a new conversation after changing skill files.
-3. Send the research request, e.g. `/infinite Research evidence for and against
-   the Book of Mormon until I say stop; use the bundled research protocol.`
-4. The launcher reads `infinite/SKILL.md`; the agent initializes the ledger and
-   alternates for/against rounds using the workspace's web/browser tools.
+3. Send only `use this skill` or `/infinite`. The full task is bundled in
+   `infinite/references/fixed-task.md`; no task arguments are required.
+4. The launcher reads `infinite/SKILL.md` and the fixed prompt; the agent
+   initializes the ledger and alternates for/against rounds using the workspace's
+   web/browser tools.
 
 The skill does not grant network access. If the Cloud environment restricts
 hosts, lacks a browser, or hits a paywall, record the limitation and use accessible

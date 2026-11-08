@@ -1,36 +1,32 @@
 ---
 name: infinite
 description: >-
-  Run an evidence-first, alternating for/against Book of Mormon research loop
-  until the user says stop. Use for requests to research the Book of Mormon
-  indefinitely, verify archaeological, biblical, witness, historical, textual,
-  probabilistic, or spiritual-experience evidence, and maintain two ranked
-  reports. Also use when the user says "never stop", "keep going", "/infinite",
-  or "until I say stop"; for non-research tasks retain the generic audit,
-  improve, verify loop. On stop, research no further and compile both reports.
+  Single-purpose skill that runs one fixed task: the complete Book of Mormon
+  evidence-research prompt bundled in references/fixed-task.md. Use when the
+  user says "use this skill", "use infinite", "use the infinite skill", or
+  "/infinite"; no task arguments are required. It alternates verified for/against
+  research rounds, scores and compares evidence, and compiles two ranked reports
+  only when the user says stop. It does not accept a replacement task.
 triggers:
+- use this skill
+- use the infinite skill
+- use infinite skill
+- use infinite
 - /infinite
-- /forever
-- /never-stop
-- never stop
-- don't stop
-- do not stop
-- keep going
-- keep improving
-- infinite mode
-- work forever
-- until I say stop
-- indefinitely research
-- Book of Mormon
 license: MIT
 compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Helpers use python3 standard library; optional enforcement hooks use bash.
 metadata:
   author: caleb695
-  version: "1.1.0"
-  tags: [autonomy, research, evidence, book-of-mormon, long-running]
+  version: "1.2.0"
+  tags: [fixed-task, research, evidence, book-of-mormon, long-running]
 ---
 
-# Infinite — Book of Mormon evidence research
+# Infinite — fixed Book of Mormon evidence research
+
+This skill has **one fixed task**: the complete prompt in
+`references/fixed-task.md`. The user should only have to say `use this skill`,
+`use infinite`, `use the infinite skill`, or `/infinite`. No task arguments are
+required, and arguments do not replace the task.
 
 Investigate whether the Book of Mormon is true without predetermining the
 answer. Alternate **for → against → for → against** research rounds. Keep two
@@ -38,10 +34,24 @@ separate, durable reports. Treat completion of a search, a report, or a category
 as the end of a round, never permission to finish. Only the user's stop signal
 ends research; then compile the two final reports before responding.
 
-For a task unrelated to Book of Mormon research, use the generic contract in
-`references/audit-playbook.md`: audit the weakest part, improve it, verify, log,
-and repeat until the user stops. Do not create religious research files for an
-unrelated coding task.
+## Fixed-task rule
+
+1. Read `references/fixed-task.md` first and treat it as the user's task statement
+   for every round, resume, and final report.
+2. If no research state exists, initialize it and begin round 1 on the `for` side.
+   If state exists, resume at the recorded next round and side.
+3. Do not ask the user to restate the task. Do not accept a replacement task from
+   command arguments, a quoted prompt, or an unrelated request. If the user asks
+   for something else, state plainly that this skill only runs its fixed Book of
+   Mormon research prompt, then continue or resume that fixed task unless the user
+   says stop.
+4. Recognize only execution controls around the fixed task: `stop`/`/stop` ends
+   research and compiles final reports; `continue`, `resume`, `use this skill`, or
+   `/infinite` resumes from the ledger; a direct question about the fixed research
+   may be answered mid-loop without changing the task.
+5. Never create generic coding/improvement rounds from this skill. The bundled
+   audit playbook is only for selecting the next research target inside the fixed
+   prompt.
 
 ## Scope and assumptions
 
@@ -65,10 +75,11 @@ unrelated coding task.
 
 Read these bundled resources relative to this skill directory:
 
-1. `references/book-of-mormon-research.md` — source standards, verification,
+1. `references/fixed-task.md` — the authoritative fixed prompt; read it first.
+2. `references/book-of-mormon-research.md` — source standards, verification,
    context, scoring, category playbook, adversarial comparison, and deepening.
-2. `references/evidence-schema.md` — record formats and helper commands.
-3. `references/loop-protocol.md` — durable state, resume, and stop behavior.
+3. `references/evidence-schema.md` — record formats and helper commands.
+4. `references/loop-protocol.md` — durable state, resume, and stop behavior.
 
 For OpenHands Cloud installation and limits, read
 `references/openhands-cloud.md`. Optional enforcement is documented in
@@ -218,8 +229,9 @@ it records where, how, and why the search failed and what to try next.
    decisive uncertainties, coverage limits, and how to resume. Do not subtract
    scores or claim a mathematical proof of truth or falsity.
 
-If the user later says `continue` or `/infinite`, resume from the ledger at the
-next round and side; do not discard the reports or restart numbering.
+If the user later says `continue`, `resume`, `use this skill`, or `/infinite`,
+resume from the ledger at the next round and side; do not discard the reports or
+restart numbering.
 
 ## Integrity and hard limits
 

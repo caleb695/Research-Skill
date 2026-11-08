@@ -1,10 +1,17 @@
 # Research-Skill — Infinite evidence research
 
-An [Agent Skills](https://docs.openhands.dev/overview/skills) package specialized
-for one task: **research evidence for and against the Book of Mormon until the
-user says stop, then compile two ranked reports.** It keeps the original Infinite
-idea—never elect to finish early—but replaces generic code polishing with an
-evidence-first research loop when the task concerns the Book of Mormon.
+An [Agent Skills](https://docs.openhands.dev/overview/skills) package that runs
+**one fixed task only**: the complete Book of Mormon evidence-research prompt
+bundled in [`infinite/references/fixed-task.md`](infinite/references/fixed-task.md).
+The user should basically only have to say:
+
+```text
+use this skill
+```
+
+or `/infinite`. No long prompt or task arguments are required. The skill does not
+accept a replacement task and does not fall back to generic coding/improvement
+work.
 
 Compatible with OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and clients
 that read `SKILL.md`. Helpers use only the Python 3 standard library; optional
@@ -164,7 +171,7 @@ Research-Skill/
 ├── infinite/                         canonical self-contained skill
 │   ├── SKILL.md
 │   ├── commands/infinite.md
-│   ├── references/                   research, schema, loop, Cloud, enforcement
+│   ├── references/                   fixed-task, research, schema, loop, Cloud, enforcement
 │   ├── scripts/                      ledger/state/guard/hooks/installer
 │   └── assets/
 ├── tests/smoke.sh                    generic enforcement/install checks

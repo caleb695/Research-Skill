@@ -1,13 +1,14 @@
 # infinite — Book of Mormon evidence research
 
-An Infinite skill specialized for the request: keep researching evidence for and
-against the Book of Mormon until the user says stop, then compile two ranked
-reports. It retains the generic audit/improve/verify loop for unrelated tasks.
+A single-purpose Infinite skill. It runs one fixed bundled prompt: keep
+researching evidence for and against the Book of Mormon until the user says stop,
+then compile two ranked reports. The user only has to say `use this skill` or
+`/infinite`; no task arguments are required or accepted as a replacement task.
 
 ## Trigger
 
-`/infinite`, `/forever`, `/never-stop`, `Book of Mormon`, `indefinitely research`,
-or phrases such as “never stop,” “keep going,” and “until I say stop.”
+`use this skill`, `use infinite`, `use the infinite skill`, or `/infinite`.
+These start or resume the fixed prompt in `references/fixed-task.md`.
 
 ## Research round
 
@@ -29,6 +30,7 @@ never fabricated.
 ## Files
 
 - `SKILL.md` — canonical contract.
+- `references/fixed-task.md` — authoritative fixed prompt.
 - `references/book-of-mormon-research.md` — source standards, context, rubric,
   category playbook, adversarial comparison, deepening.
 - `references/evidence-schema.md` — JSON records and helper commands.
@@ -61,9 +63,7 @@ Hook commands are repo-relative so a Cloud checkout path does not break them.
 ## Use
 
 ```text
-/infinite Research evidence for and against the Book of Mormon until I say stop.
-Verify every item, read full context, score it, compare both sides, avoid repeats,
-and keep the two reports current.
+use this skill
 ```
 
 Say `stop` to end research and compile both final reports. With research hooks,

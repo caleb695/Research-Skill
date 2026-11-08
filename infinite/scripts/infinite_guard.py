@@ -79,6 +79,10 @@ ARM_PATTERNS = [
     r"\bwork forever\b",
     r"\buntil i say stop\b",
     r"\bindefinitely research\b",
+    r"\buse this skill\b",
+    r"\buse the infinite skill\b",
+    r"\buse infinite skill\b",
+    r"\buse infinite\b",
 ]
 
 # Commands the agent must never run: they would change enforcement.
@@ -306,8 +310,8 @@ def loop_context(project: Path, profile: str = "generic") -> str:
         dry = int(state.get("dry_rounds", 0))
         depth = " After three dry rounds, deepen primary-text/dependency work; after six, revisit uncertain and confident claims." if dry >= 3 else ""
         return (
-            f"Book of Mormon research protocol: read infinite/SKILL.md (or the loaded skill directory), "
-            f"restore the ledger, and start the next {side} round. Authenticate the source, read full "
+            f"Fixed Book of Mormon research protocol: read references/fixed-task.md and infinite/SKILL.md "
+            f"(or the loaded skill directory), restore the ledger, and start the next {side} round. Authenticate the source, read full "
             "context/POV, score credibility/accuracy/relevance/usefulness, deduplicate, compare against "
             "the other side, record the item and round, compile both reports, and validate. Alternate "
             "sides even after a rejected or fruitless round; log searches and access limits honestly."
@@ -561,6 +565,8 @@ def cmd_userprompt(payload: dict, project: Path, policy: dict | None = None) -> 
     explicit = bool(re.search(r"(^|\s)/(stop|halt|cancel|quit)\b", message, re.I))
     research_stop = bool(re.search(r"^\s*(?:please\s+)?stop (?:researching|research|the research)\b", message, re.I))
     research_arm = bool(re.search(r"\bindefinitely research\b", message, re.I))
+    negated_fixed = bool(re.search(r"\b(?:do not|don't|never)\s+use (?:this|the infinite|infinite) skill\b", message, re.I))
+    fixed_invocation = bool(re.search(r"(^|\s)(?:please\s+)?use (?:this|the infinite|infinite) skill\b", message, re.I)) and not negated_fixed
 
     def hit(patterns: list[str]) -> bool:
         return any(re.search(pattern, message, re.I) for pattern in patterns)
@@ -597,7 +603,7 @@ def cmd_userprompt(payload: dict, project: Path, policy: dict | None = None) -> 
         )
         return emit_allow("Infinite mode disarmed by the user's stop message.")
     arm_explicit = bool(re.search(r"(^|\s)/(infinite|forever|never-stop)\b", message, re.I))
-    if (words <= MAX_COMMAND_WORDS and hit(ARM_PATTERNS)) or arm_explicit or research_arm:
+    if (words <= MAX_COMMAND_WORDS and hit(ARM_PATTERNS) and not negated_fixed) or arm_explicit or research_arm or fixed_invocation:
         (project / GUARD_DIR).mkdir(parents=True, exist_ok=True)
         (project / GUARD_DIR / "DISARMED").unlink(missing_ok=True)
         (project / GUARD_DIR / STOP_REQUESTED).unlink(missing_ok=True)

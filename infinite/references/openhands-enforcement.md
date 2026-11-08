@@ -120,9 +120,10 @@ an agent-editable state mirror.
   `STOP_REQUESTED` instead of immediately disarming: research ends, but finishing
   waits for both final reports to pass the configured gates. The user can still
   override with the installer's `--disarm`.
-- **Arms:** `/infinite`, `/forever`, `/never-stop`, "never stop", "keep going",
-  "infinite mode", "until I say stop", "indefinitely research". Re-arming clears
-  a prior `STOP_REQUESTED`; the agent then resumes from the ledger.
+- **Arms:** `use this skill`, `use infinite`, `use the infinite skill`, `/infinite`,
+  and legacy infinite phrases such as "never stop" or "until I say stop".
+  Re-arming clears a prior `STOP_REQUESTED`; the agent then resumes the fixed
+  prompt from the ledger.
 - **Ignored:** prose and questions — "add a stop button to the UI", "how does the
   stop hook work?", "why did the build stop?" — so normal work does not
   accidentally end the loop.
