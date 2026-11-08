@@ -161,10 +161,10 @@ cp -r "$SKILL_DIR" "$PROJ2/skillcopy"
     && pass "installer works from an unrelated cwd" || fail "installer failed from an unrelated cwd"
 STOP_CMD="$(python3 -c "
 import json;print(json.load(open('$PROJ2/.openhands/hooks.json'))['stop'][0]['hooks'][0]['command'])")"
-case "$STOP_CMD" in /*) pass "hook command uses an absolute path";; *) fail "hook command is not absolute: $STOP_CMD";; esac
+case "$STOP_CMD" in "bash .openhands/hooks/"*) pass "hook command is repo-relative for Cloud portability";; *) fail "hook command is not portable: $STOP_CMD";; esac
 OUT="$(printf '{"event_type":"Stop","session_id":"s","working_dir":"%s","metadata":{"reason":"agent_finished"}}' "$PROJ2" \
-      | ( cd /tmp && OPENHANDS_PROJECT_DIR="$PROJ2" eval "$STOP_CMD" ) 2>/dev/null)"
-[ -n "$OUT" ] && pass "hook runs from an unrelated cwd" || fail "hook produced no output from /tmp"
+      | ( cd "$PROJ2" && OPENHANDS_PROJECT_DIR="$PROJ2" eval "$STOP_CMD" ) 2>/dev/null)"
+[ -n "$OUT" ] && pass "hook runs from the relocated project cwd" || fail "hook produced no output from project cwd"
 python3 - "$OUT" <<'PY2' && pass "deny payload carries gate detail for the agent" || fail "payload lacks gate detail"
 import json, sys
 payload = json.loads(sys.argv[1])

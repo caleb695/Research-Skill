@@ -1,105 +1,124 @@
-# Loop protocol — durable state for endless runs
+# Loop protocol — durable state for long research runs
 
-An endless loop only works if it survives the things that kill long runs:
-context compaction, a new conversation, a crashed tool, an iteration cap. Keep
-the loop in files, not in memory.
+Keep the loop in files so context compaction, a new conversation, or an iteration
+cap does not erase findings. For Book of Mormon research, follow this protocol
+with `book-of-mormon-research.md` and `evidence-schema.md`; for other tasks use
+the generic audit/improve/verify round.
 
 ## Where state lives
 
-```
+```text
 <project>/.infinite/
-├── state.json     current round, phase, next target
-└── ledger.jsonl   append-only round history (never rewritten)
+├── state.json       round, profile, next side/target, dry-round count
+└── ledger.jsonl     append-only rounds, evidence revisions, claims, searches, notes
 
-<project>/.openhands/guard/     enforcement state (user-owned, see openhands-enforcement.md)
-├── config.json    mirror of the armed policy
-├── attempts.json  finish attempts, for the "tried again without a round" message
-├── DISARMED       present after the user says stop
-└── events.jsonl   audit trail of arm/disarm/deny decisions
+<project>/research/
+├── book-of-mormon-for.md
+└── book-of-mormon-against.md
+
+<project>/.openhands/guard/   user-owned enforcement state
+├── config.json       mirror of the loaded policy
+├── attempts.json     finish-attempt history
+├── DISARMED          generic stop or user override
+├── STOP_REQUESTED    research stop; final reports still required
+└── events.jsonl      arm/disarm/deny audit trail
 ```
 
-`.infinite/` is scratch state. Add it to `.gitignore` unless the user wants the
-ledger committed as a deliverable. Never commit `.openhands/guard/`.
+`.infinite/` is scratch state; keep it out of Git unless the user explicitly wants
+the raw ledger preserved. The two Markdown reports are deliverables. Never commit
+`.openhands/guard/`. Hook wiring may be committed when the user wants it to travel
+with the repo; use the installer's portable relative commands.
 
-Use `scripts/infinite_state.py` for all reads and writes:
+## Initialize and log
 
 ```bash
-python3 scripts/infinite_state.py init --task "make the CLI robust"
-python3 scripts/infinite_state.py status
-python3 scripts/infinite_state.py next-target "handle broken pipe on stdout"
-python3 scripts/infinite_state.py log \
-  --target "broken pipe crash" \
-  --change "catch BrokenPipeError in main()" \
-  --verification "tests 96/96, manual: yes | head -1 runs clean" \
-  --next "property tests for argument parsing"
-python3 scripts/infinite_state.py report
+python3 infinite/scripts/infinite_research.py --dir . init
+python3 infinite/scripts/infinite_state.py --dir . status
+python3 infinite/scripts/infinite_research.py --dir . status
 ```
 
-Arming and disarming are the user's actions, not yours: they happen through the
-installer and the conversation (`stop`), never through the agent. See
-[`openhands-enforcement.md`](openhands-enforcement.md).
+Replace `infinite/scripts` with the actual loaded skill's script directory. `init`
+is idempotent: it preserves the round, next side, and existing findings.
 
-If the scripts are unavailable, keep the same information by hand in
-`.infinite/ledger.jsonl` and `.infinite/state.json`. The format matters less
-than the fact that the next round can be reconstructed from disk.
+A completed research round uses the state helper:
 
-## Round record
+```bash
+python3 infinite/scripts/infinite_state.py --dir . log \
+  --side against --outcome accepted --evidence-id A001 \
+  --target "Check the strongest objection to the previous item" \
+  --change "Added A001 after primary-source and context checks" \
+  --verification "Locator/provenance checked; helper validate passed" \
+  --next "Return to the for side and test the reply to A001"
+```
 
-One JSON object per line, appended after each completed round:
+Sides must alternate `for → against → for`, including rejected, blocked, and
+no-new rounds. Outcomes are `accepted`, `revised`, `rejected`, `deepened`,
+`blocked`, `no-new`. Accepted/revised/deepened rounds require an evidence ID. Every round
+requires verification actually performed and a next target. The helper advances
+the side and tracks consecutive nonproductive rounds; three triggers deeper
+primary work and six triggers review of uncertain and confident claims.
+
+Research events are appended by `infinite_research.py evidence|revise|claim|search|
+note`. A revision keeps the same ID and updates the current record; it is not a
+new piece of evidence. Compile and validate after logging:
+
+```bash
+python3 infinite/scripts/infinite_research.py --dir . compile
+python3 infinite/scripts/infinite_research.py --dir . validate
+```
+
+A round record looks like:
 
 ```json
-{"ts":"2026-11-04T18:22:03+00:00","event":"round","round":7,"target":"empty input crash","change":"guard len==0 in parse_config","verification":"tests 84/84, lint clean","next":"property tests for parse_config","notes":"found via fuzz seed 12"}
+{"ts":"2026-11-07T23:00:00+00:00","event":"round","round":7,"profile":"book-of-mormon","side":"against","outcome":"accepted","evidence_id":"A001","target":"primary-source objection","change":"added A001","verification":"original and context checked; validator passed","next":"for-side reply","notes":"source chain mapped"}
 ```
 
-Rules:
-
-- Append only. Never rewrite history to look better than it was.
-- `verification` must be something you actually ran, quoted with its result.
-- `next` is mandatory in practice: it is how the loop restarts after a context
-  reset.
-
-## Checkpointing
-
-- After each round, leave the workspace in a state that builds and tests clean.
-  An endless loop must never end a round in a broken state.
-- Commit at meaningful boundaries (`git add -A && git commit -m "round N: <target>"`)
-  when the project is a git repo and the user has not asked you not to.
-- Never force-push, never rewrite shared history, never commit secrets.
-- Keep an untracked scratch file for half-finished experiments; delete it or
-  finish it within the same round.
+Append only. Never rewrite history to look better. If a source was wrong, append
+a revision and keep the rejected/corrected trail. Do not log a check you did not
+perform. If scripts are unavailable, maintain the same fields by hand and keep
+the two reports current; do not silently drop findings.
 
 ## Resuming
 
-On a new conversation, after compaction, or when told to `continue`:
+On `continue`, `/infinite`, compaction, or a new run:
 
-1. `python3 scripts/infinite_state.py status` — read round, phase, armed.
-2. `python3 scripts/infinite_state.py report --limit 10` — read recent rounds.
-3. Re-run the project's checks to learn the real current state (the ledger may
-   predate a change made outside the loop).
-4. Continue at `round + 1` with the recorded next target, or re-audit if the
-   recorded target no longer applies.
-5. Do not restart numbering at 1, and do not re-announce the task.
+1. Read `state.json`, recent ledger events, and both reports.
+2. Run the research validator; repair stale reports or broken references from the
+   ledger before adding new findings.
+3. If a prior user stop was recorded and the user now explicitly continues, run
+   `infinite_state.py resume` and compile a new interim snapshot.
+4. Continue at `round + 1` with the recorded next side and target. Do not restart
+   numbering, re-announce the task, or duplicate evidence already registered.
+5. Re-check access limits; a previously blocked source is a new route to try, not
+   permission to repeat an identical failing command.
 
-If no state exists at all but the user's instruction still holds (they asked
-for an infinite loop and have not stopped), reconstruct the ledger from the
-conversation and continue.
+If no state exists but the user's instruction still holds, reconstruct what can be
+supported from the conversation and mark uncertain reconstructions explicitly.
 
 ## When the user says stop
 
-1. Finish the atomic step in progress; do not leave a half-applied edit.
-2. Run the checks one last time and fix anything you broke.
-3. Stop: the user's message or `--disarm` releases the Stop hook. Do not try to
-   disarm it yourself — the PreToolUse hook blocks that, by design.
-4. Give a single closing summary: rounds completed, what changed, verification
-   status, remaining known weaknesses. This is the one moment a final summary
-   is correct.
-5. On a later `continue` or `/infinite`, resume at the next round.
+1. Stop searching immediately. Finish only the current atomic file write.
+2. Do not start another research round. Reconcile recorded findings, duplicates,
+   corrections, and claim links.
+3. Run `infinite_research.py compile --final`, then `validate --final`. With the
+   research hook installed, the user's stop message creates `STOP_REQUESTED`; the
+   Stop gate checks the final reports and allows finishing when they pass. The
+   user's installer `--disarm` is an override, not an agent action.
+4. Present both reports and a short closing summary: strongest claims each side,
+   category coverage, decisive uncertainties, rejected leads, access limits, and
+   resume instructions. This is the one time a final summary is appropriate.
+5. A later explicit continue resumes from the ledger; it does not erase history.
 
-## Anti-patterns
+For a generic non-research task, a stop disarms immediately; finish the atomic
+step, run checks, and summarize. Never try to disarm research enforcement yourself.
 
-- Storing the plan only in the conversation. Compaction will eat it.
-- Repeating the same failing command. This trips stuck detection and wastes the
-  round; change the approach instead.
-- Logging rounds you did not verify. It makes the ledger worthless.
-- Letting the ledger grow descriptions instead of evidence. One line, with the
-  command and its result.
+## Checkpoints and anti-patterns
+
+- Leave each round with valid ledger/report state; commit checkpoints when the
+  user asked for repository changes and it is safe to do so.
+- Never force-push shared history, commit secrets, or publish without permission.
+- Do not store the only copy of findings in conversation memory.
+- Do not repeat identical failing searches/commands; change source class or route.
+- Do not invent evidence to reset the dry-round counter or satisfy a gate.
+- Do not treat a generated report as authentication. The citations and recorded
+  checks must support every entry.

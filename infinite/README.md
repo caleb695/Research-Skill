@@ -1,131 +1,82 @@
-# infinite
+# infinite — Book of Mormon evidence research
 
-An agent skill that never lets the agent finish. When the task is complete it
-starts another round: audit the current state, find the single weakest part,
-improve it, verify it, log it, and go again. The loop ends only when the user
-explicitly says stop.
-
-> "Go back, improve, go back, improve" — the default behaviour, not a fallback.
+An Infinite skill specialized for the request: keep researching evidence for and
+against the Book of Mormon until the user says stop, then compile two ranked
+reports. It retains the generic audit/improve/verify loop for unrelated tasks.
 
 ## Trigger
 
-`/infinite`, `/forever`, `/never-stop`, or any of: "never stop", "don't stop
-until I say stop", "keep going", "keep improving", "infinite mode", "work
-forever", "until I say stop".
+`/infinite`, `/forever`, `/never-stop`, `Book of Mormon`, `indefinitely research`,
+or phrases such as “never stop,” “keep going,” and “until I say stop.”
 
-## What it does each round
+## Research round
 
-1. **Check for stop** — re-read the latest user message; continue unless it
-   clearly means stop.
-2. **Snapshot** — re-run the project's checks and read the current diff.
-3. **Audit** — pick the weakest part, scored by impact × confidence ÷ effort.
-4. **Improve** — one meaningful change, with a test that would have caught it.
-5. **Verify** — the targeted check plus the full suite.
-6. **Log and report** — append to `.infinite/ledger.jsonl`, post one short line,
-   go to 1.
+1. Check for an explicit user stop; otherwise restore the ledger and next side.
+2. Alternate **for → against → for → against**, even after rejected/blocked rounds.
+3. Pick one high-value evidence gap or objection; search reliable sources.
+4. Authenticate the item, read full context/POV, and investigate the strongest
+   reply and disconfirming evidence.
+5. Deduplicate by underlying observation; rate credibility, accuracy, relevance,
+   and usefulness with reasons; compute one overall Evidence Impact Score.
+6. Compare against the other side, record evidence/claim/search events, log the
+   round, compile both reports, validate, and continue.
 
-## Why it does not drift or die
+Three nonproductive rounds trigger deeper primary-text/dependency work; six
+trigger review of uncertain and confident claims. Original synthesis is labeled
+as such, not passed off as a new historical discovery. Blocked access is logged,
+never fabricated.
 
-- **Explicit stop definition** — only user-authored stop language ends the loop;
-  silence, approvals, new questions, and tool failures never do.
-- **Durable ledger** — round history lives on disk, so context compaction or a
-  new session resumes at the next round instead of restarting.
-- **Escalation ladder** — as easy wins run out, rounds climb from fix → prove →
-  harden → simplify → extend, so quality keeps rising instead of re-polishing.
-- **No fake progress** — a round that found nothing must say so and change axis.
-- **Enforcement, not suggestion** — three OpenHands hooks make finishing deny,
-  block the agent from disabling them, and let only a real user message end the
-  mode. The policy travels on the hook command line, which the running
-  conversation cannot rewrite.
+## Files
+
+- `SKILL.md` — canonical contract.
+- `references/book-of-mormon-research.md` — source standards, context, rubric,
+  category playbook, adversarial comparison, deepening.
+- `references/evidence-schema.md` — JSON records and helper commands.
+- `references/loop-protocol.md` — durable state, resume, stop/finalization.
+- `references/openhands-cloud.md` — Cloud loading and portability checks.
+- `references/openhands-enforcement.md` — optional user-owned hooks.
+- `scripts/infinite_research.py` — stdlib ledger, scoring, dedup, validator, and
+  two-report compiler.
+- `scripts/infinite_state.py` — round cursor, alternating side, dry-round count.
+- `scripts/infinite_guard.py` and hook dispatchers — optional enforcement.
+
+The workspace receives `.infinite/` scratch state and two deliverables:
+`research/book-of-mormon-for.md` and `research/book-of-mormon-against.md`.
 
 ## Install
 
-Copy the directory into a skills location OpenHands reads:
-
 ```bash
-# per project (recommended)
-mkdir -p .agents/skills
-cp -r skills/infinite .agents/skills/infinite
+# complete skill + research enforcement; run before starting the conversation
+bash infinite/scripts/install-openhands-hooks.sh --dir . --research --install-skill
 
-# or per user, for every project
-mkdir -p ~/.agents/skills
-cp -r skills/infinite ~/.agents/skills/infinite
+# skill only, no enforcement
+bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill --no-arm
 ```
 
-Legacy locations `.openhands/skills/` and `.openhands/microagents/` also work.
-Claude Code reads the same `SKILL.md` from `.claude/skills/`.
+The canonical package installs to `.agents/skills/infinite/`. OpenHands Cloud can
+also load `infinite/` directly as a Git-hosted skill/plugin; this repository ships
+a project launcher at `.agents/skills/infinite/SKILL.md` for workspace discovery.
+Hook commands are repo-relative so a Cloud checkout path does not break them.
 
-### Turn it into enforcement (OpenHands)
+## Use
 
-```bash
-.agents/skills/infinite/scripts/install-openhands-hooks.sh --dir .
+```text
+/infinite Research evidence for and against the Book of Mormon until I say stop.
+Verify every item, read full context, score it, compare both sides, avoid repeats,
+and keep the two reports current.
 ```
 
-One command installs the guard, three hooks, and an immutable per-session
-policy. From then on:
+Say `stop` to end research and compile both final reports. With research hooks,
+the stop message requests finalization and the gate waits for valid final reports
+rather than ordering more research. Say `continue` later to resume from the ledger.
 
-- every finish attempt is **denied** (exit 2) with the failing gates and the
-  next target in the deny reason;
-- the agent **cannot** run the guard, edit it, rewrite `hooks.json`, or delete
-  enforcement — `PreToolUse` blocks it;
-- only a **real user message** ends the mode (`stop`), and prose like "add a stop
-  button to the UI" does not.
+## Requirements and limits
 
-```bash
-scripts/install-openhands-hooks.sh --dir . --status    # mode, gates, rounds, attempts
-scripts/install-openhands-hooks.sh --dir . --disarm    # user says stop
-scripts/install-openhands-hooks.sh --dir . --uninstall # remove it all
-```
-
-## Usage
-
-```
-/infinite make the CSV exporter production-ready
-```
-
-Then leave it running. Say `stop` (or `/stop`) to end it. Say `stop after the
-tests pass` to end at a boundary. Say `continue` later to resume from the ledger.
-
-## Contents
-
-```
-infinite/
-├── SKILL.md                          the loop contract and round procedure
-├── commands/infinite.md              slash-command shim
-├── references/
-│   ├── loop-protocol.md              ledger, checkpointing, resume, stop handling
-│   ├── audit-playbook.md             per-domain audit checklists, scoring, ladder
-│   └── openhands-enforcement.md      Stop hook setup, arming, safety, limits
-├── scripts/
-│   ├── infinite_guard.py            enforcement engine (stop/pretool/userprompt)
-│   ├── stop_hook.sh                 Stop hook dispatcher (forwards the policy)
-│   ├── pretool_hook.sh             blocks the agent from disabling enforcement
-│   ├── userprompt_hook.sh          arms/disarms only on real user messages
-│   ├── infinite_state.py            ledger/status/report (stdlib only)
-│   └── install-openhands-hooks.sh   user control surface: install/arm/disarm
-├── assets/                           templates copied into a project if needed
-└── .plugin/, .claude-plugin/, .codex-plugin/   plugin metadata
-```
-
-## Requirements
-
-- An agent that reads Agent Skills `SKILL.md` files (OpenHands, Claude Code, or
-  any compatible client).
-- `python3` for the state helper; `bash` for the hook. Both are optional — the
-  skill degrades to plain instructions without them.
-
-## Limits, honestly
-
-- Enforcement lives in hooks, so it applies to OpenHands (Agent Canvas, Cloud,
-  CLI, SDK). Other clients get the instructions only.
-- A deleted hook script stops the hook from running — OpenHands treats an
-  erroring hook as an error, not a denial. Two guard copies and `--status`
-  ("last decisions") are the mitigation, not a guarantee against an agent that
-  removes every copy and restarts the conversation.
-- OpenHands still ends a *run* at `max_iterations` (default 500) and applies
-  stuck detection; the ledger makes that boundary resumable rather than fatal.
-- Nothing can override a user who stops the process, closes the session, or
-  revokes access. "Never stop" means the agent never elects to stop.
+Python 3 standard library for helpers; bash for optional hooks; an agent with
+web/browser access for online research. The skill does not grant network access.
+OpenHands iteration/budget/context limits still apply; checkpoint and resume.
+Scores are ordinal research judgments, not probabilities of truth. The validator
+checks structure and consistency, not historical reality.
 
 ## License
 

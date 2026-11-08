@@ -1,4 +1,7 @@
 __pycache__/
 *.pyc
 .infinite/
-.openhands/hooks/
+.openhands/guard/
+
+# Generated hook wiring may be committed for OpenHands Cloud portability.
+# Review policies for secrets before committing .openhands/hooks.json/hooks/.

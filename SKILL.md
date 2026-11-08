@@ -1,12 +1,12 @@
 ---
 name: ai-infinite-skill
 description: >-
-  Keep working on the user's task indefinitely. Use when the user says "never
-  stop", "don't stop until I say stop", "keep going", "work forever", "infinite
-  mode", "keep improving", "/infinite", or asks the agent to continue
-  autonomously instead of finishing. After the task is complete, re-audit it,
-  find the weakest part, improve it, verify, and start another round — forever —
-  until the user explicitly says stop.
+  Repository entry point for Infinite's Book of Mormon evidence-research loop.
+  Use when asked to research evidence for and against the Book of Mormon until
+  the user says stop, with source authentication, full context/POV checks,
+  alternating for/against rounds, one overall evidence score, deduplication,
+  cross-side evaluation, and two ranked final reports. Also supports the generic
+  infinite audit/improve/verify loop for unrelated tasks.
 triggers:
 - /infinite
 - /forever
@@ -19,247 +19,69 @@ triggers:
 - infinite mode
 - work forever
 - until I say stop
+- indefinitely research
+- Book of Mormon
 license: MIT
-compatibility: OpenHands (Agent Canvas, Cloud, CLI, SDK), Claude Code, and any Agent Skills client. Scripts need python3 (stdlib only); enforcement hooks need bash.
+compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Canonical package is infinite/; project discovery launcher is .agents/skills/infinite/SKILL.md.
 metadata:
   author: caleb695
-  version: "1.0.0"
+  version: "1.1.0"
   canonical: infinite/SKILL.md
 ---
 
-# Infinite — never finish, always improve
+# Infinite — repository entry point
 
-Run the user's task in an uninterrupted improvement loop. Treat "the task is
-done" as the **end of round N**, never as the end of the work. The only exit is
-an explicit stop from the user.
+The canonical, self-contained skill is [`infinite/SKILL.md`](infinite/SKILL.md).
+Read it in full before starting, then read the references it names. This root
+file is a pointer for clients that read a repository-level skill; OpenHands
+project discovery uses [`.agents/skills/infinite/SKILL.md`](.agents/skills/infinite/SKILL.md),
+which launches the same canonical package.
 
-Use imperative mood throughout this loop. No step ends the session.
+## Research contract in brief
 
-## The contract
+For Book of Mormon evidence requests:
 
-| Situation | What to do |
-| --- | --- |
-| Task appears complete | Start the next round: audit → improve → verify |
-| Round loses value (diminishing returns) | Raise the level of abstraction or attack a new axis, then start the next round |
-| Tool error, failing test, broken build | Fix it inside the current round, then continue the loop |
-| Hitting an iteration, spend, or context limit | Consolidate state, then resume the loop |
-| Genuine security, legal, or data-loss risk | Pause that **one action**, state the risk, take a safe alternative, keep looping |
-| User says stop / cancel / that's enough | Stop after the current atomic step. State the state and how to resume |
-| A Stop hook denies the finish | Treat the deny reason as the work order for the next round, never as something to bypass |
-| User says nothing | Keep looping. Silence is never a stop signal |
+1. Initialize the durable research ledger and two working reports.
+2. Alternate **for → against → for → against** rounds until an explicit user stop.
+3. Authenticate each item, read full context and POV, investigate deeply, and
+   record credibility/accuracy/relevance/usefulness ratings with reasons. The
+   helper computes one overall score; scores are not truth probabilities.
+4. Deduplicate by underlying observation, revise instead of repeating, and
+   evaluate every item against the strongest opposing evidence or alternative.
+5. Use reliable primary/scholarly sources; exclude Wikipedia, Reddit, Quora,
+   anonymous posts, and AI summaries as evidence. Label bias and dependence.
+6. When novelty dries up, deepen primary-text/dependency work and revisit uncertain
+   and confident claims. Log blocked searches honestly; never invent findings.
+7. On stop, cease research and compile `research/book-of-mormon-for.md` and
+   `research/book-of-mormon-against.md`, with overall/category claim rankings and
+   ranked evidence. Present both before finishing.
 
-Rule zero: **never idle, never wait, never ask permission to continue.** A
-report, summary, or status update is a message in the middle of work, not the
-end of work. Emit it, then immediately begin the next round.
+The Bible-as-true assumption is the user's stipulated premise and must be labeled.
+The Book of Mormon is primary evidence of its contents, not independent proof of
+its historicity. Historically documented spiritual experiences are evidence of
+reported belief/experience, not automatic public verification of a supernatural
+cause.
 
-## What counts as "stop"
+For unrelated tasks, follow the canonical skill's generic audit → improve →
+verify → log loop. Platform iteration/budget/network limits are checkpoint/resume
+boundaries, not permission to fabricate progress or override the user.
 
-Only user-authored text counts, and only when it clearly means stop:
-
-- Explicit: "stop", "halt", "cancel", "quit", "exit infinite mode", "that's
-  enough", "you can stop now", "/stop".
-- Qualified: "stop after this round", "stop once the tests pass" — finish that
-  boundary, then stop.
-
-Not a stop signal (keep going):
-
-- Silence, timeouts, or the user reading/being away.
-- Approvals, "looks good", "nice", thumbs-up, emoji.
-- New questions or scope additions — these **extend** the work.
-- Tool failures, CI failures, permission errors, rate limits, empty outputs.
-- The agent's own thoughts that it is done, or that further work is impossible.
-- Context compaction, a new session, or a resumed conversation — only stop if
-  the user has said stop within this conversation thread.
-
-If it is genuinely ambiguous whether the user meant "stop", prefer continuing
-with the smallest useful next step and say plainly: `Continuing round N — say
-"stop" to end.` Never require the user to repeat themselves to be obeyed.
-
-## The round
-
-Run these steps in order. Each round is small enough that a user's "stop"
-lands within seconds to a few minutes.
-
-### 1. Check for stop
-
-Re-read the latest user message. If it is a stop signal, stop now. Otherwise set
-`N = N + 1` and continue.
-
-### 2. Snapshot the state
-
-Establish what "better" means for this task, from evidence, not memory:
-
-- Read the task statement, the current diff, and the files touched.
-- Re-run the checks (build, tests, lint, typecheck, benchmarks) or whatever
-  defines success for this target.
-- Note open TODOs, failing checks, warnings, skipped tests, unhandled cases.
-
-Keep the running state in the ledger so a context reset cannot erase it.
-
-### 3. Audit — find the single weakest part
-
-Score candidates on **impact × confidence ÷ effort** and pick the best one.
-Look for, in rough order of payoff:
-
-1. **Correctness gaps** — untested paths, edge cases, wrong assumptions,
-   race conditions, off-by-one, error handling that swallows failures.
-2. **Broken or skipped checks** — failing builds, disabled tests, ignored
-   warnings, TODO/FIXME markers introduced by your own work.
-3. **Robustness** — input validation, boundary values, empty and huge inputs,
-   timeouts, retries, partial failure, idempotency.
-4. **Performance** — hot loops, repeated work, allocation, query per row.
-5. **Security and privacy** — injection, unsafe deserialization, secrets in
-   code or logs, missing authorization, path traversal.
-6. **Clarity** — names, dead code, duplication, misleading abstractions.
-7. **Docs and tests** — missing coverage of the thing just changed, stale
-   README, undocumented behaviour.
-8. **Delight** — UX, output quality, error messages, accessibility, polish the
-   user would notice.
-
-Record the one sentence you are acting on: `Round N target: <weakest part> —
-because <evidence>.` If the last three rounds all came back low-value, switch
-axis (e.g. from internals to user-facing behaviour) or raise ambition (refactor,
-design change, new capability) rather than polishing the same line again.
-
-### 4. Improve — one meaningful change
-
-Make the smallest change that fully removes the weakness. Then:
-
-- Keep behaviour-safe: run the checks again after the edit.
-- Prefer a real fix plus a test that would have caught it over either alone.
-- Do not widen scope beyond what the target demands; the loop already
-  guarantees more rounds will come.
-- Commit checkpoints so progress is never lost (see `references/loop-protocol.md`).
-
-### 5. Verify
-
-Prove the change works: run the specific check for the target **and** the broad
-suite. If anything regressed, fix it before moving on. An unverified round does
-not count as progress; it counts as debt you must repay next round.
-
-### 6. Log and report, then go to 1
-
-Append a ledger entry (state, round, target, change, verification, next
-candidate). Post a **short** progress line — never a final summary:
-
-```
-Round 7 ✓ — fixed empty-input crash in parse_config(); tests 84/84, lint clean.
-Next: add property tests for the same parser.
-```
-
-Then return to step 1 immediately. Do not ask "shall I continue?".
-
-## Do not declare done
-
-Banned as terminal statements (they may only appear as progress notes):
-
-- "The task is complete."
-- "All done — let me know if you want anything else."
-- "I've finished the implementation."
-- Any message whose last line invites the user to give a new task.
-
-The correct final line of every round is the next target, never a goodbye.
-When you must produce a deliverable (a PR, a report, a release), producing it is
-a round deliverable; polish, harden, document, and test it in the following
-rounds.
-
-## Reporting cadence
-
-- After every round: one to three lines as shown above.
-- Every 5 rounds: a compact status block (rounds done, checks status, what moved).
-- Never repeat a full summary of the work unless the user asks or the run stops.
-- Stay useful: each round should leave the artifact measurably better, and you
-  should be able to say in one sentence why.
-
-## Context, cost, and hard limits
-
-Long runs hit real limits. Handle them without stopping:
-
-- **Context** — keep the ledger in a file, not in your head. On compaction or a
-  fresh session, read the ledger and continue at the next round number.
-- **Iteration budget** — OpenHands runs end a conversation at `max_iterations`
-  (default 500). When near the limit, write the ledger and final state, then ask
-  the user to raise the budget or say `continue` to start a new run; instruct
-  them to keep the ledger file so the new run resumes mid-loop.
-- **Stuck detection** — repeating the same action with the same result will trip
-  stuck detection. Never repeat an identical failing command; change approach.
-- **Cost** — rounds must stay small and evidence-driven. If a round would be
-  expensive, split it or pick a cheaper target.
-- **Sandbox limits** — no network, missing dependency, or unwritable path is a
-  constraint to design around, not a reason to stop.
-
-## Enforcement — the part that is not a prompt
-
-These instructions are advisory; the model can still try to finish. When the
-user installs enforcement, finishing stops being the agent's decision:
-
-```bash
-scripts/install-openhands-hooks.sh --dir .        # install + arm
-scripts/install-openhands-hooks.sh --dir . --status
-```
-
-That writes three OpenHands hooks plus a policy the agent cannot change for the
-running conversation:
-
-- **Stop** — every finish attempt is denied (exit 2) with live gate results and
-  ledger status in the reason, so the next turn is the next round. Modes:
-  `required` (never allow), `allow-when-green`, `always`.
-- **PreToolUse** — the agent may not run the guard or installer, edit
-  `.openhands/guard`, rewrite `hooks.json`, or delete enforcement files.
-- **UserPromptSubmit** — only a real user message can arm or disarm ("stop"
-  ends it; prose like "add a stop button" does not).
-
-Never try to disable, edit, rewrite, or work around enforcement. It belongs to
-the user. If a hook denies a tool call, do not look for another route to the same
-effect — the correct response is the next round of real work.
-
-Act on the deny reason: it names the failing gates, the round count, and the next
-target. A deny is not an error to report and stop on; it is the work order.
-
-Read `references/openhands-enforcement.md` for the full contract, verification,
-and limits.
-
-## Guardrails
-
-The loop is unconditional about continuing, not about consequences:
-
-- Never take destructive or irreversible actions without a clear user request
-  (no force-push to shared branches, no dropping data, no deleting user files,
-  no spending money, no publishing).
-- Never invent progress. If a round found nothing worth changing, say so and
-  change axis; do not fake a fix to keep the loop moving.
-- Never expose secrets, tokens, or personal data while improving.
-- If the user asks a direct question mid-loop, answer it and continue the loop.
-
-## Bundled resources
+## Resources
 
 | Path | Purpose |
 | --- | --- |
-| `references/loop-protocol.md` | Ledger format, checkpointing, resuming after compaction |
-| `references/audit-playbook.md` | Per-domain audit checklists and target-selection scoring |
-| `references/openhands-enforcement.md` | The enforced contract: hooks, immutability, limits |
-| `scripts/infinite_state.py` | Ledger init/log/status/report helper (stdlib only) |
-| `scripts/infinite_guard.py` | Enforcement engine — decides stop/pre-tool/user-prompt |
-| `scripts/stop_hook.sh` | Stop hook dispatcher — forwards the immutable policy |
-| `scripts/pretool_hook.sh` | Blocks the agent from disabling enforcement |
-| `scripts/userprompt_hook.sh` | Arms/disarms only on real user messages |
-| `scripts/install-openhands-hooks.sh` | User's control surface: install/arm/disarm/status |
+| [`infinite/SKILL.md`](infinite/SKILL.md) | Canonical round contract |
+| [`infinite/references/book-of-mormon-research.md`](infinite/references/book-of-mormon-research.md) | Verification, context, scoring, categories, deepening |
+| [`infinite/references/evidence-schema.md`](infinite/references/evidence-schema.md) | Ledger records and helper commands |
+| [`infinite/references/loop-protocol.md`](infinite/references/loop-protocol.md) | Durable state, resume, stop/finalization |
+| [`infinite/references/openhands-cloud.md`](infinite/references/openhands-cloud.md) | Cloud loading, portable hooks, limits |
+| [`infinite/references/openhands-enforcement.md`](infinite/references/openhands-enforcement.md) | Optional user-owned enforcement |
 
----
+Install the complete package and optional research enforcement with:
 
-## Repository layout (this copy)
+```bash
+bash infinite/scripts/install-openhands-hooks.sh --dir . --research --install-skill
+```
 
-This root `SKILL.md` exists so the repo can be loaded directly, without copying
-anything. It is a thin pointer: the canonical skill lives in [`infinite/`](infinite/SKILL.md).
-
-| What | Where |
-| --- | --- |
-| The loop contract (canonical) | [`infinite/SKILL.md`](infinite/SKILL.md) |
-| Ledger, resume, stop handling | [`infinite/references/loop-protocol.md`](infinite/references/loop-protocol.md) |
-| Audit checklists and scoring | [`infinite/references/audit-playbook.md`](infinite/references/audit-playbook.md) |
-| Enforcement contract | [`infinite/references/openhands-enforcement.md`](infinite/references/openhands-enforcement.md) |
-| Install (skill + enforcement) | `bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill` |
-| Ledger helper | `python3 infinite/scripts/infinite_state.py log --target ... --verification ... --next ...` |
-
-Read `infinite/SKILL.md` before starting a round; the rules above are the short
-version of the same contract.
+Run installation before starting the OpenHands conversation. The agent must not
+edit or bypass user-owned enforcement. See the README for Cloud import options.

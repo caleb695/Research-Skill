@@ -48,6 +48,8 @@ from pathlib import Path
 
 GUARD_DIR = Path(".openhands") / "guard"
 LEDGER_REL = Path(".infinite") / "ledger.jsonl"
+RESEARCH_PROFILE = "book-of-mormon"
+STOP_REQUESTED = "STOP_REQUESTED"
 DEFAULT_TIMEOUT = 600
 MAX_TAIL_LINES = 12
 
@@ -62,6 +64,7 @@ STOP_PATTERNS = [
     r"\benough for now\b",
     r"/stop\b",
     r"\bexit infinite mode\b",
+    r"^\s*(?:please\s+)?stop (?:researching|research|the research)\b",
 ]
 ARM_PATTERNS = [
     r"/infinite\b",
@@ -75,6 +78,7 @@ ARM_PATTERNS = [
     r"\bkeep improving\b",
     r"\bwork forever\b",
     r"\buntil i say stop\b",
+    r"\bindefinitely research\b",
 ]
 
 # Commands the agent must never run: they would change enforcement.
@@ -295,7 +299,21 @@ def ledger_round_label(project: Path) -> object:
     return rounds[-1].get("round") if rounds else None
 
 
-def loop_context(project: Path) -> str:
+def loop_context(project: Path, profile: str = "generic") -> str:
+    if profile == RESEARCH_PROFILE:
+        state = read_json(project / ".infinite" / "state.json", {})
+        side = state.get("next_side", "for")
+        dry = int(state.get("dry_rounds", 0))
+        depth = " After three dry rounds, deepen primary-text/dependency work; after six, revisit uncertain and confident claims." if dry >= 3 else ""
+        return (
+            f"Book of Mormon research protocol: read infinite/SKILL.md (or the loaded skill directory), "
+            f"restore the ledger, and start the next {side} round. Authenticate the source, read full "
+            "context/POV, score credibility/accuracy/relevance/usefulness, deduplicate, compare against "
+            "the other side, record the item and round, compile both reports, and validate. Alternate "
+            "sides even after a rejected or fruitless round; log searches and access limits honestly."
+            + depth + " Only an explicit user stop ends research; then compile final reports. "
+            f"Enforcement ({project / GUARD_DIR}) belongs to the user; do not edit or bypass it."
+        )
     return (
         "Infinite loop protocol: (1) re-read the latest user message and stop only if it "
         "explicitly says stop; (2) snapshot state and re-run the checks; (3) pick the "
@@ -341,6 +359,7 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
         )
 
     mode = str(policy.get("mode") or "required")
+    stop_requested = policy.get("profile") == RESEARCH_PROFILE and (project / GUARD_DIR / STOP_REQUESTED).exists()
     if mode == "disabled" or (project / GUARD_DIR / "DISARMED").exists():
         log_event(project, "stop_allowed", mode=mode, round=ledger_round_label(project))
         return emit_allow()
@@ -360,6 +379,20 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
     else:
         gates = [run_gate(project, gate) for gate in policy.get("gates", [])]
     failing = [gate for gate in gates if not gate["ok"]]
+
+    if stop_requested:
+        report = gate_report(gates)
+        if failing:
+            log_event(project, "finalization_denied", round=ledger["last_round"], failing=[g["name"] for g in failing])
+            return emit_deny(
+                "Research has stopped at the user's request, but the final reports are not ready. "
+                "Do not resume searching. Reconcile the existing ledger, run compile --final, fix "
+                "validation errors, and present both reports. " + report,
+                "Finalization only: use recorded findings; no new research round. The user may "
+                "override with the installer's --disarm command.",
+            )
+        log_event(project, "stop_allowed", reason="user stop; final reports validated", round=ledger["last_round"])
+        return emit_allow("Research stopped; both final reports passed the configured gates.")
 
     require_rounds = int(policy.get("require_rounds") or 0)
     needs_round = ledger["rounds_since_arm"] < require_rounds
@@ -388,7 +421,7 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
         return emit_deny(
             "Infinite mode is ON (allow-when-green): finishing requires every gate to pass and "
             "a newly verified round since the last attempt. " + report,
-            loop_context(project),
+            loop_context(project, str(policy.get("profile", "generic"))),
         )
 
     if failing:
@@ -407,6 +440,12 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
             "round. That is exactly what this guard blocks. Complete a round now: pick the "
             "weakest part, change it, verify it, log it, then continue to the next round."
         )
+    elif policy.get("profile") == RESEARCH_PROFILE:
+        head = (
+            f"Infinite research mode is ON ({mode}). A completed search or report is not a stop. "
+            "Start the next alternating for/against evidence round now; verify, contextualize, "
+            "score, compare, deduplicate, log, compile, and validate."
+        )
     else:
         head = (
             f"Infinite mode is ON ({mode}). The task being complete is not a stop condition. "
@@ -422,7 +461,7 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
         needs_round=needs_round,
         repeated=repeated,
     )
-    return emit_deny(head + " " + report, loop_context(project))
+    return emit_deny(head + " " + report, loop_context(project, str(policy.get("profile", "generic"))))
 
 
 # --------------------------------------------------------------------------- #
@@ -510,7 +549,7 @@ def enforcement_installed(project: Path) -> bool:
         return False
 
 
-def cmd_userprompt(payload: dict, project: Path) -> int:
+def cmd_userprompt(payload: dict, project: Path, policy: dict | None = None) -> int:
     message = str(payload.get("message") or payload.get("prompt") or payload.get("content") or "")
     if not message or not enforcement_installed(project):
         return emit_allow()
@@ -520,14 +559,35 @@ def cmd_userprompt(payload: dict, project: Path) -> int:
     short = words <= MAX_COMMAND_WORDS and not is_task
     # Slash commands are unambiguous even inside a longer message.
     explicit = bool(re.search(r"(^|\s)/(stop|halt|cancel|quit)\b", message, re.I))
+    research_stop = bool(re.search(r"^\s*(?:please\s+)?stop (?:researching|research|the research)\b", message, re.I))
+    research_arm = bool(re.search(r"\bindefinitely research\b", message, re.I))
 
     def hit(patterns: list[str]) -> bool:
         return any(re.search(pattern, message, re.I) for pattern in patterns)
 
     # "add a stop button to the UI" must not disarm: prose only counts when it is
     # short enough to be an instruction, or when it uses an explicit command.
-    if (short and hit(STOP_PATTERNS)) or explicit:
+    if (short and hit(STOP_PATTERNS)) or explicit or research_stop:
         (project / GUARD_DIR).mkdir(parents=True, exist_ok=True)
+        state = read_json(project / ".infinite" / "state.json", {})
+        config = read_json(project / GUARD_DIR / "config.json", {})
+        if policy is not None:
+            research_active = policy.get("profile") == RESEARCH_PROFILE and policy.get("mode") != "disabled"
+        else:
+            research_active = state.get("profile") == RESEARCH_PROFILE and config.get("mode", "required") != "disabled"
+        if research_active:
+            (project / GUARD_DIR / STOP_REQUESTED).write_text(
+                f"stop requested {now()} by user message: {message[:200]}\n", encoding="utf-8"
+            )
+            append_jsonl(
+                project / GUARD_DIR / "events.jsonl",
+                {"ts": now(), "event": "stop_requested", "source": "user_message", "message": message[:200]},
+            )
+            return emit_allow(
+                "Stop research now. Do not start another round. Reconcile recorded findings, "
+                "run the research helper's compile --final and validate, then present both reports. "
+                "The Stop hook allows finishing once the configured final-report gates pass."
+            )
         (project / GUARD_DIR / "DISARMED").write_text(
             f"disarmed {now()} by user message: {message[:200]}\n", encoding="utf-8"
         )
@@ -537,9 +597,10 @@ def cmd_userprompt(payload: dict, project: Path) -> int:
         )
         return emit_allow("Infinite mode disarmed by the user's stop message.")
     arm_explicit = bool(re.search(r"(^|\s)/(infinite|forever|never-stop)\b", message, re.I))
-    if (words <= MAX_COMMAND_WORDS and hit(ARM_PATTERNS)) or arm_explicit:
+    if (words <= MAX_COMMAND_WORDS and hit(ARM_PATTERNS)) or arm_explicit or research_arm:
         (project / GUARD_DIR).mkdir(parents=True, exist_ok=True)
         (project / GUARD_DIR / "DISARMED").unlink(missing_ok=True)
+        (project / GUARD_DIR / STOP_REQUESTED).unlink(missing_ok=True)
         append_jsonl(
             project / GUARD_DIR / "events.jsonl",
             {"ts": now(), "event": "arm", "source": "user_message", "message": message[:200]},
@@ -620,8 +681,7 @@ def probe_gate(gate: dict) -> tuple[bool, str]:
     # npm/pnpm/yarn/cargo/go/make: the runner itself must exist
     if shutil.which(tokens[0]) is None:
         return False, f"'{tokens[0]}' is not installed"
-    # `npm test` etc. need the project's script to exist
-    package = read_json(Path(gate.get("project") or ".") / "package.json")
+    # Runner availability is probed statically; the gate itself reports failures.
     return True, "ok"
 
 
@@ -652,9 +712,10 @@ def parse_gates(specs: list[str]) -> list[dict]:
     return gates
 
 
-def build_policy(project: Path, mode: str, gates: list[dict], require_rounds: int) -> dict:
+def build_policy(project: Path, mode: str, gates: list[dict], require_rounds: int, profile: str = "generic") -> dict:
     return {
         "v": 2,
+        "profile": profile,
         "mode": mode,
         "gates": gates,
         "require_rounds": require_rounds,
@@ -678,7 +739,7 @@ def cmd_policy(args) -> int:
             f"warning: skipping gate '{item['name']}' ({item['command']}): {item['reason']}",
             file=sys.stderr,
         )
-    policy = build_policy(project, mode, gates, int(args.require_rounds))
+    policy = build_policy(project, mode, gates, int(args.require_rounds), RESEARCH_PROFILE if args.research else "generic")
     if skipped:
         policy["skipped_gates"] = skipped
     print(encode_policy(policy))
@@ -688,8 +749,8 @@ def cmd_policy(args) -> int:
 def cmd_arm(args) -> int:
     project = project_from_arg(args.dir)
     gates = parse_gates(args.gate or [])
+    existing = read_json(project / GUARD_DIR / "config.json")
     if not gates and not args.no_gates:
-        existing = read_json(project / GUARD_DIR / "config.json")
         gates = existing.get("gates") or detect_gates(project)
     gates, skipped = partition_gates(project, gates)
     for item in skipped:
@@ -699,11 +760,13 @@ def cmd_arm(args) -> int:
         args.mode or "required",
         gates,
         int(args.require_rounds if args.require_rounds is not None else 1),
+        RESEARCH_PROFILE if args.research else existing.get("profile", "generic"),
     )
     if skipped:
         policy["skipped_gates"] = skipped
     write_json(project / GUARD_DIR / "config.json", {**policy, "policy_blob": encode_policy(policy)})
     (project / GUARD_DIR / "DISARMED").unlink(missing_ok=True)
+    (project / GUARD_DIR / STOP_REQUESTED).unlink(missing_ok=True)
     write_json(project / GUARD_DIR / "attempts.json", {"count": 0, "last_round": None})
     append_jsonl(
         project / GUARD_DIR / "events.jsonl",
@@ -806,7 +869,7 @@ def cmd_uninstall(args) -> int:
             else:
                 config.pop(key, None)
         write_json(path, config)
-    for name in ("config.json", "attempts.json", "DISARMED", "events.jsonl"):
+    for name in ("config.json", "attempts.json", "DISARMED", STOP_REQUESTED, "events.jsonl"):
         (project / GUARD_DIR / name).unlink(missing_ok=True)
     print(f"uninstalled infinite-mode enforcement from {project}")
     return 0
@@ -844,7 +907,7 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_stop(payload, project, policy, policy_supplied)
         if event == "pretool":
             return cmd_pretool(payload, project)
-        return cmd_userprompt(payload, project)
+        return cmd_userprompt(payload, project, policy)
 
     import argparse
 
@@ -858,6 +921,7 @@ def main(argv: list[str] | None = None) -> int:
     policy.add_argument("--gate", action="append", metavar="NAME:COMMAND")
     policy.add_argument("--no-gates", action="store_true")
     policy.add_argument("--require-rounds", type=int, default=1)
+    policy.add_argument("--research", action="store_true", help="use the Book of Mormon research profile")
     policy.set_defaults(func=cmd_policy)
 
     arm = sub.add_parser("arm", parents=[common], help="record the policy on disk (user action)")
@@ -865,6 +929,7 @@ def main(argv: list[str] | None = None) -> int:
     arm.add_argument("--gate", action="append", metavar="NAME:COMMAND")
     arm.add_argument("--no-gates", action="store_true")
     arm.add_argument("--require-rounds", type=int, default=None)
+    arm.add_argument("--research", action="store_true", help="use the Book of Mormon research profile")
     arm.set_defaults(func=cmd_arm)
 
     disarm = sub.add_parser("disarm", parents=[common], help="end infinite mode (user action)")

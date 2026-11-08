@@ -16,6 +16,8 @@ cannot change decide whether a run may finish.
 
 ```bash
 bash infinite/scripts/install-openhands-hooks.sh --dir /path/to/project
+# Book of Mormon research profile + report validator:
+bash infinite/scripts/install-openhands-hooks.sh --dir /path/to/project --research --install-skill
 ```
 
 Add `--install-skill` to also place the skill at `.agents/skills/infinite/`
@@ -27,22 +29,22 @@ That single command:
    `.openhands/hooks/infinite_guard.py` (two copies, so deleting one directory
    cannot disable enforcement);
 2. copies three thin hook scripts into `.openhands/hooks/`;
-3. **embeds the policy** — mode, gates, required rounds — as a base64 blob in the
-   Stop hook command inside `.openhands/hooks.json`;
+3. **embeds the policy** — profile, mode, gates, required rounds — as a base64
+   blob in the Stop hook command inside `.openhands/hooks.json`;
 4. preserves any existing hook entries and never duplicates its own.
 
 ```json
 {
   "stop": [
     { "matcher": "*", "hooks": [
-      { "command": "bash .openhands/hooks/infinite-stop.sh --policy eyJ2IjoyLCJtb2RlIjoicmVxdWlyZWQi...", "timeout": 60 }
+      { "command": "bash .openhands/hooks/infinite-stop.sh --policy eyJ2IjoyLCJtb2RlIjoicmVxdWlyZWQi...", "timeout": 615 }
     ]}
   ],
   "pre_tool_use": [
     { "matcher": "*", "hooks": [{ "command": "bash .openhands/hooks/infinite-pretool.sh", "timeout": 20 }] }
   ],
   "user_prompt_submit": [
-    { "matcher": "*", "hooks": [{ "command": "bash .openhands/hooks/infinite-userprompt.sh", "timeout": 15 }] }
+    { "matcher": "*", "hooks": [{ "command": "bash .openhands/hooks/infinite-userprompt.sh --policy eyJ2IjoyLCJwcm9maWxlIjoi...", "timeout": 15 }] }
   ]
 }
 ```
@@ -56,7 +58,10 @@ command line, and the on-disk `config.json` is only a mirror for `status`.
 
 The Stop hook forwards `"$@"` (the policy) to the guard. If the policy argument
 is present but unreadable, the guard **fails closed** — it never falls back to a
-file the agent could have written.
+file the agent could have written. Hook commands are repo-relative because the
+SDK executor runs them with cwd set to the conversation working folder; this is
+portable across OpenHands Cloud checkout paths. The Stop hook timeout is derived
+from the configured gate budgets so a gate cannot outlive its hook.
 
 ## The three hooks
 
@@ -83,7 +88,7 @@ Modes (`--mode`):
 
 | Mode | Allows a finish when |
 | --- | --- |
-| `required` (default) | Never. Each finish attempt becomes the next round |
+| `required` (default) | Never while active. Each finish attempt becomes the next round. In the research profile, a user stop switches to final-report validation instead |
 | `allow-when-green` | Every gate passes **and** a newly verified round was logged |
 | `always` | Never, and gates are not evaluated (cheapest) |
 | `disabled` | Installed but off |
@@ -105,12 +110,19 @@ text-based only for shell tools). Denials are logged to `events.jsonl`.
 ### `user_prompt_submit` — only the user can end it
 
 A real user message is the one input the agent cannot forge. It disarms on a
-stop phrase and re-arms on an infinite phrase.
+stop phrase and re-arms on an infinite phrase. The installer also forwards the
+immutable policy here, so research stop/finalization behavior does not depend on
+an agent-editable state mirror.
 
 - **Disarms:** `stop`, `halt`, `cancel`, `quit`, `that's enough`, `/stop`,
-  short imperative messages like "ok stop now".
+  short imperative messages like "ok stop now". In an active research profile,
+  `stop` or `stop researching and compile the final reports` writes
+  `STOP_REQUESTED` instead of immediately disarming: research ends, but finishing
+  waits for both final reports to pass the configured gates. The user can still
+  override with the installer's `--disarm`.
 - **Arms:** `/infinite`, `/forever`, `/never-stop`, "never stop", "keep going",
-  "infinite mode", "until I say stop".
+  "infinite mode", "until I say stop", "indefinitely research". Re-arming clears
+  a prior `STOP_REQUESTED`; the agent then resumes from the ledger.
 - **Ignored:** prose and questions — "add a stop button to the UI", "how does the
   stop hook work?", "why did the build stop?" — so normal work does not
   accidentally end the loop.
@@ -146,7 +158,9 @@ echo '{"event_type":"Stop","working_dir":"'"$PWD"'"}' \
 
 `tests/smoke.sh` automates the enforcement checks (including nine attack
 attempts); `tests/openhands_compat.py` verifies the loader and hook contract
-above and runs the hooks from an unrelated cwd with the SDK's exact payload.
+above with the SDK's payload shape and working-directory rule; and
+`tests/test_research.py` checks research finalization plus a relocated Cloud-style
+checkout. These are local contract tests, not a live hosted Cloud run.
 
 ## Verified against the OpenHands SDK source
 
@@ -160,12 +174,22 @@ by `tests/openhands_compat.py`:
 | `description` is the AgentSkills required field, truncated past 1024 chars | `sdk/skills/skill.py:MAX_DESCRIPTION_LENGTH` | description is ~470 chars |
 | `triggers:` (a YAML list) becomes a `KeywordTrigger`; matching is whole-token, case-insensitive | `sdk/skills/skill.py:_keyword_matches` | `/infinite`, "never stop", "keep going" all fire |
 | A `paths:` key takes precedence and turns the skill into a path rule | `sdk/skills/skill.py:_create_skill_from_metadata` | never set `paths:` here |
-| Hook `command` runs with `shell=True`, `timeout`, and the hook's `cwd` = project dir | `sdk/hooks/executor.py` | commands use absolute quoted paths |
+| Hook `command` runs with `shell=True`, `timeout`, and the hook's `cwd` = project dir | `sdk/hooks/executor.py` | commands use portable repo-relative paths; dispatchers resolve their own directory |
 | Exit code `2` blocks; stdout `{"decision":"deny"}` also blocks | `sdk/hooks/executor.py` | both are sent |
 | Stop hook blocking flips the run from `FINISHED` back to `RUNNING` | `sdk/conversation/impl/local_conversation.py` | the loop continues automatically |
 | **The Stop path forwards only `additionalContext`** to the agent (role `user`, source `environment`); `reason` is not forwarded | `sdk/hooks/conversation_hooks.py:run_stop` | denials put the gate results and next target in **both** fields |
 | Stdin is a `HookEvent`: `event_type`, `tool_name`, `tool_input`, `tool_response`, `message`, `session_id`, `working_dir`, `metadata` | `sdk/hooks/types.py` | the guard tolerates every field and unknown keys |
 | `OPENHANDS_PROJECT_DIR` is exported to hooks | `sdk/hooks/executor.py` | used to locate the project |
+
+## Research profile
+
+`--research` embeds `profile: book-of-mormon`, copies the stdlib research helper
+beside the hooks, adds a `research` validation gate, and initializes the two
+working reports. Deny context names the next for/against side and the evidence
+protocol instead of generic coding work. A user stop creates `STOP_REQUESTED`;
+the gate then requires `compile --final` reports whose ledger digest is current.
+It never asks for another research round after that stop. See
+[`openhands-cloud.md`](openhands-cloud.md) and [`evidence-schema.md`](evidence-schema.md).
 
 ## What enforcement still cannot do
 

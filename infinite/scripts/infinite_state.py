@@ -123,6 +123,10 @@ def cmd_init(args: argparse.Namespace) -> int:
         },
     )
     state["task"] = args.task or state.get("task") or "(unspecified)"
+    state["profile"] = args.profile or state.get("profile", "generic")
+    if state["profile"] == "book-of-mormon":
+        state.setdefault("next_side", "for")
+        state.setdefault("dry_rounds", 0)
     state["updated_at"] = now()
     write_json(p["state"], state)
     if args.arm:
@@ -186,6 +190,27 @@ def cmd_log(args: argparse.Namespace) -> int:
         p["state"],
         {"task": "(unspecified)", "round": 0, "phase": "audit", "next_target": None},
     )
+    profile = state.get("profile", "generic")
+    if profile == "book-of-mormon":
+        if state.get("stop_requested"):
+            print("research is stopped; compile final reports, or use resume after the user says continue", file=sys.stderr)
+            return 2
+        if args.side not in {"for", "against"} or args.outcome not in {"accepted", "revised", "rejected", "deepened", "blocked", "no-new"}:
+            print("research rounds require --side and --outcome", file=sys.stderr)
+            return 2
+        expected = state.get("next_side", "for")
+        if args.side != expected:
+            print(f"research sides must alternate; next side is {expected}", file=sys.stderr)
+            return 2
+        if not args.verification or not args.next:
+            print("research rounds require --verification and --next", file=sys.stderr)
+            return 2
+        if args.outcome in {"accepted", "revised", "deepened"} and not args.evidence_id:
+            print("accepted/revised/deepened research rounds require --evidence-id", file=sys.stderr)
+            return 2
+        state["next_side"] = "against" if args.side == "for" else "for"
+        state["dry_rounds"] = 0 if args.outcome in {"accepted", "revised", "deepened"} else int(state.get("dry_rounds", 0)) + 1
+        state["last_side"] = args.side
     state["round"] = int(args.round if args.round is not None else state.get("round", 0) + 1)
     state["phase"] = "audit"
     state["next_target"] = args.next or state.get("next_target")
@@ -197,6 +222,10 @@ def cmd_log(args: argparse.Namespace) -> int:
             "ts": now(),
             "event": "round",
             "round": state["round"],
+            "profile": profile,
+            "side": args.side,
+            "outcome": args.outcome,
+            "evidence_id": args.evidence_id,
             "target": args.target,
             "change": args.change,
             "verification": args.verification,
@@ -212,6 +241,24 @@ def cmd_log(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resume(args: argparse.Namespace) -> int:
+    root = state_dir(args.dir)
+    p = paths(root)
+    state = read_json(p["state"], {})
+    if not state:
+        print("no state to resume; initialize the task first", file=sys.stderr)
+        return 1
+    state["stop_requested"] = False
+    state["phase"] = "audit"
+    if args.next:
+        state["next_target"] = args.next
+    state["updated_at"] = now()
+    write_json(p["state"], state)
+    append_jsonl(p["ledger"], {"ts": now(), "event": "resume", "round": state.get("round", 0), "next_side": state.get("next_side")})
+    print(f"resuming after round {state.get('round', 0)}; next side: {state.get('next_side', 'for')}")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     root = state_dir(args.dir)
     p = paths(root)
@@ -222,6 +269,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"state dir : {root}")
     print(f"task      : {state.get('task', '(unspecified)')}")
     print(f"round     : {state.get('round', 0)}")
+    print(f"profile   : {state.get('profile', 'generic')}")
+    if state.get("profile") == "book-of-mormon":
+        print(f"next side : {state.get('next_side', 'for')}")
+        print(f"dry rounds: {state.get('dry_rounds', 0)}")
     print(f"phase     : {state.get('phase', 'audit')}")
     print(f"next      : {state.get('next_target') or '(not chosen yet)'}")
     print(f"armed     : {p['armed'].exists()}")
@@ -262,6 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = sub.add_parser("init", help="create or update the ledger")
     init.add_argument("--task", help="the user's task, verbatim where possible")
+    init.add_argument("--profile", choices=["generic", "book-of-mormon"], help="task profile (default: preserve existing or generic)")
     init.add_argument("--arm", action="store_true", help="also arm the loop")
     init.set_defaults(func=cmd_init)
 
@@ -284,7 +336,14 @@ def build_parser() -> argparse.ArgumentParser:
     log.add_argument("--next")
     log.add_argument("--notes")
     log.add_argument("--round", type=int, help="force the round number")
+    log.add_argument("--side", choices=["for", "against"], help="required for Book of Mormon research rounds")
+    log.add_argument("--outcome", choices=["accepted", "revised", "rejected", "deepened", "blocked", "no-new"])
+    log.add_argument("--evidence-id", help="canonical evidence added or revised this round")
     log.set_defaults(func=cmd_log)
+
+    resume = sub.add_parser("resume", help="resume after the user says continue; preserve round and side")
+    resume.add_argument("--next", help="optional replacement target")
+    resume.set_defaults(func=cmd_resume)
 
     status = sub.add_parser("status", help="print the current state")
     status.set_defaults(func=cmd_status)

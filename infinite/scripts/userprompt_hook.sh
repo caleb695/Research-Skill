@@ -6,7 +6,9 @@
 # one. A stop phrase ("stop", "cancel", "that's enough", "/stop", ...) disarms
 # the guard; an infinite phrase ("/infinite", "never stop", ...) re-arms it.
 #
-# Exit 0 always: the user's message is never blocked.
+# Exit 0 always: the user's message is never blocked. "$@" may carry the
+# installer's immutable policy so research stop behavior cannot be changed by
+# editing the agent-owned state mirror.
 
 set -uo pipefail
 
@@ -25,5 +27,5 @@ if [ -z "$guard" ] || ! command -v python3 >/dev/null 2>&1; then
     exit 0
 fi
 
-printf '%s' "$input" | python3 "$guard" userprompt
+printf '%s' "$input" | python3 "$guard" userprompt "$@"
 exit 0

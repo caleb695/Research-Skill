@@ -1,7 +1,13 @@
 # Audit playbook — picking the weakest part
 
-Each round needs exactly one target. This file is how to find it and how to
-argue that it was the right one.
+For Book of Mormon research, use `book-of-mormon-research.md` as the domain
+playbook: the target is an evidence gap, weak citation, unresolved objection,
+context/provenance problem, or primary-text comparison. Alternate for/against
+rounds and score evidence with the four-dimension rubric; do not substitute the
+coding checklist below for source verification. The selection rule still applies.
+
+Each generic round needs exactly one target. This file is how to find it and how
+to argue that it was the right one.
 
 ## Selection rule
 
@@ -69,6 +75,18 @@ Run this every few rounds regardless of domain:
 - Metric computed by a tested function, not inline guesswork.
 - Edge cases: single class, all nulls, out-of-range values, huge cardinality.
 - Results report sample sizes and uncertainty, not just a point estimate.
+
+### Research reports
+
+- Every item has an authenticity verdict, actual checks, full context/POV, source
+  locators, independence group, four rated dimensions with reasons, and one
+  computed overall score.
+- Check exact and semantic duplicates; revise the canonical item instead of
+  counting a new URL or paraphrase as new evidence.
+- Evaluate against the strongest opposite-side item or alternative; mark pending
+  links and dependent source chains explicitly.
+- Search/access failures and original synthesis are recorded honestly; a score is
+  not a probability of truth and item counts are not weight.
 
 ### Docs / writing deliverables
 

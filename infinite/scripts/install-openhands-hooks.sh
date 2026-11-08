@@ -6,6 +6,7 @@
 #   bash install-openhands-hooks.sh --no-arm            # install without arming
 #   bash install-openhands-hooks.sh --gate "tests:pytest -q" --gate "lint:ruff check ."
 #   bash install-openhands-hooks.sh --mode allow-when-green
+#   bash install-openhands-hooks.sh --research --install-skill  # Book of Mormon profile + validator
 #   bash install-openhands-hooks.sh --status            # mode, gates, rounds, decisions
 #   bash install-openhands-hooks.sh --disarm            # user says stop: allow finishing
 #   bash install-openhands-hooks.sh --uninstall         # remove hooks and guard state
@@ -41,12 +42,13 @@ MODE=""
 REQUIRE_ROUNDS=""
 DISARM_REASON=""
 INSTALL_SKILL=0
+RESEARCH=0
 SCOPE="project"
 REF="${INFINITE_REF:-main}"
 # Base URL of the skill directory (the one containing SKILL.md and scripts/).
 # Only used when this script runs standalone (curl | bash) with no siblings.
 # A value ending in /scripts is accepted too, for convenience.
-RAW_BASE="${INFINITE_RAW_BASE:-https://raw.githubusercontent.com/caleb695/AI-Infinite-Skill/$REF/infinite}"
+RAW_BASE="${INFINITE_RAW_BASE:-https://raw.githubusercontent.com/caleb695/Research-Skill/$REF/infinite}"
 RAW_BASE="${RAW_BASE%/}"
 case "$RAW_BASE" in
     */scripts) RAW_BASE="${RAW_BASE%/scripts}" ;;
@@ -63,6 +65,7 @@ while [ $# -gt 0 ]; do
         --gate) GATES+=("$2"); shift 2 ;;
         --no-gates) NO_GATES=1; shift ;;
         --mode) MODE="$2"; shift 2 ;;
+        --research) RESEARCH=1; shift ;;
         --require-rounds) REQUIRE_ROUNDS="$2"; shift 2 ;;
         --reason) DISARM_REASON="$2"; shift 2 ;;
         --ref) REF="$2"; shift 2 ;;
@@ -102,7 +105,7 @@ fetch_or_copy() {
     if ! curl -fsSL --max-time 60 "$base/$rel" -o "$dest"; then
         echo "could not obtain $rel (tried $base/$rel)." >&2
         echo "Run this script from a checkout of the skill instead:" >&2
-        echo "  git clone https://github.com/caleb695/AI-Infinite-Skill && bash AI-Infinite-Skill/infinite/scripts/install-openhands-hooks.sh --dir $TARGET_DIR" >&2
+        echo "  git clone https://github.com/caleb695/Research-Skill && bash Research-Skill/infinite/scripts/install-openhands-hooks.sh --dir $TARGET_DIR" >&2
         exit 1
     fi
 }
@@ -119,10 +122,14 @@ install_skill_files() {
         references/loop-protocol.md
         references/audit-playbook.md
         references/openhands-enforcement.md
+        references/book-of-mormon-research.md
+        references/evidence-schema.md
+        references/openhands-cloud.md
         commands/infinite.md
         assets/project.gitignore.fragment
         scripts/infinite_guard.py
         scripts/infinite_state.py
+        scripts/infinite_research.py
         scripts/stop_hook.sh
         scripts/pretool_hook.sh
         scripts/userprompt_hook.sh
@@ -199,12 +206,18 @@ fetch_or_copy scripts/stop_hook.sh "$HOOK_DIR/infinite-stop.sh"
 fetch_or_copy scripts/pretool_hook.sh "$HOOK_DIR/infinite-pretool.sh"
 fetch_or_copy scripts/userprompt_hook.sh "$HOOK_DIR/infinite-userprompt.sh"
 fetch_or_copy scripts/infinite_state.py "$HOOK_DIR/infinite_state.py"
+if [ "$RESEARCH" -eq 1 ]; then
+    fetch_or_copy scripts/infinite_research.py "$HOOK_DIR/infinite_research.py"
+    chmod +x "$HOOK_DIR/infinite_research.py"
+    [ "$NO_GATES" -eq 0 ] && GATES+=("research:python3 .openhands/hooks/infinite_research.py --dir . validate")
+fi
 chmod +x "$GUARD" "$HOOK_DIR"/infinite-*.sh "$HOOK_DIR/infinite_state.py" "$HOOK_DIR/infinite_guard.py"
 echo "installed guard:  $GUARD"
 echo "installed hooks:  $HOOK_DIR/infinite-{stop,pretool,userprompt}.sh"
 
 # Build the policy now, so the hook command carries it.
 policy_args=(policy)
+[ "$RESEARCH" -eq 1 ] && policy_args+=(--research)
 [ -n "$MODE" ] && policy_args+=(--mode "$MODE")
 [ "$NO_GATES" -eq 1 ] && policy_args+=(--no-gates)
 [ -n "$REQUIRE_ROUNDS" ] && policy_args+=(--require-rounds "$REQUIRE_ROUNDS")
@@ -232,21 +245,24 @@ except json.JSONDecodeError as exc:
 if not isinstance(config, dict):
     raise SystemExit(f"{hooks_path} must contain a JSON object.")
 
-# Absolute, quoted paths: the hook must work no matter what the agent's shell
-# cwd happens to be (hooks reported cwd drift against relative paths).
-project = Path(guard_dir).resolve().parent.parent
-hooks_dir = project / ".openhands" / "hooks"
+# Repo-relative commands are portable across Cloud/CLI checkout paths. OpenHands
+# runs hooks with cwd=the conversation working folder; each dispatcher resolves
+# its own directory with BASH_SOURCE. Do not bake this machine's absolute path
+# into committed hooks.json.
+import base64
+policy_obj = json.loads(base64.urlsafe_b64decode(policy + "=" * (-len(policy) % 4)))
 q = shlex.quote
 python = q(sys.executable or "python3")
 
 wanted = {
-    "stop": f"{q(str(hooks_dir / 'infinite-stop.sh'))} --policy {q(policy)}",
-    "pre_tool_use": f"{q(str(hooks_dir / 'infinite-pretool.sh'))}",
-    "user_prompt_submit": f"{q(str(hooks_dir / 'infinite-userprompt.sh'))}",
+    "stop": f"bash .openhands/hooks/infinite-stop.sh --policy {q(policy)}",
+    "pre_tool_use": "bash .openhands/hooks/infinite-pretool.sh",
+    "user_prompt_submit": f"bash .openhands/hooks/infinite-userprompt.sh --policy {q(policy)}",
 }
-# Keep `bash` out of the mix: scripts are chmod +x, and a missing execute bit is
-# a loud failure rather than a silent shell-quoting problem.
-timeouts = {"stop": 60, "pre_tool_use": 20, "user_prompt_submit": 15}
+# The Stop hook must outlive its gates; otherwise a long gate times out at the
+# hook layer and OpenHands treats it as a non-blocking error.
+gate_budget = sum(int(g.get("timeout", 600)) for g in policy_obj.get("gates", []))
+timeouts = {"stop": max(60, gate_budget + 15), "pre_tool_use": 20, "user_prompt_submit": 15}
 
 for event, command in wanted.items():
     entries = config.setdefault(event, [])
@@ -272,10 +288,15 @@ for hook in "$HOOK_DIR"/infinite-stop.sh "$HOOK_DIR"/infinite-pretool.sh "$HOOK_
     chmod +x "$hook"
 done
 
+if [ "$RESEARCH" -eq 1 ]; then
+    python3 "$HOOK_DIR/infinite_research.py" --dir "$TARGET_DIR" init
+fi
+
 if [ "$ARM" -eq 1 ]; then
     guard_cli arm "${policy_args[@]:1}"
     echo
     echo "Policy is embedded in hooks.json; the agent cannot weaken it mid-conversation."
+    echo "Hook commands are repo-relative for OpenHands Cloud portability; start a new conversation after installing."
     echo "Check:  bash $0 --dir $TARGET_DIR --status"
     echo "Gates:  python3 $GUARD doctor --dir $TARGET_DIR"
 else
