@@ -3,10 +3,11 @@
 #
 #   bash install-openhands-hooks.sh                     # install + arm in $PWD
 #   bash install-openhands-hooks.sh --dir ~/proj        # another project
-#   bash install-openhands-hooks.sh --no-arm            # install without arming
+#   bash install-openhands-hooks.sh --no-arm            # install in standby; arm by saying "use this skill"
 #   bash install-openhands-hooks.sh --gate "tests:pytest -q" --gate "lint:ruff check ."
 #   bash install-openhands-hooks.sh --mode allow-when-green
-#   bash install-openhands-hooks.sh --research --install-skill  # Book of Mormon profile + validator
+#   bash install-openhands-hooks.sh --install-skill     # fixed skill + Book of Mormon enforcement (default)
+#   bash install-openhands-hooks.sh --generic           # legacy generic infinite-loop enforcement
 #   bash install-openhands-hooks.sh --status            # mode, gates, rounds, decisions
 #   bash install-openhands-hooks.sh --disarm            # user says stop: allow finishing
 #   bash install-openhands-hooks.sh --uninstall         # remove hooks and guard state
@@ -42,7 +43,7 @@ MODE=""
 REQUIRE_ROUNDS=""
 DISARM_REASON=""
 INSTALL_SKILL=0
-RESEARCH=0
+RESEARCH=1
 SCOPE="project"
 REF="${INFINITE_REF:-main}"
 # Base URL of the skill directory (the one containing SKILL.md and scripts/).
@@ -66,6 +67,7 @@ while [ $# -gt 0 ]; do
         --no-gates) NO_GATES=1; shift ;;
         --mode) MODE="$2"; shift 2 ;;
         --research) RESEARCH=1; shift ;;
+        --generic) RESEARCH=0; shift ;;
         --require-rounds) REQUIRE_ROUNDS="$2"; shift 2 ;;
         --reason) DISARM_REASON="$2"; shift 2 ;;
         --ref) REF="$2"; shift 2 ;;
@@ -75,6 +77,14 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+# This package is a single-purpose Book of Mormon research skill. Installing it
+# installs deterministic research enforcement by default; --generic is only for
+# the legacy non-research loop. --no-arm installs standby hooks that a real user
+# message arms ("use this skill" / "/infinite"); --mode disabled turns them off.
+if [ "$ARM" -eq 0 ] && [ -z "$MODE" ]; then
+    MODE="standby"
+fi
 
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 GUARD_DIR="$TARGET_DIR/.openhands/guard"
@@ -195,6 +205,7 @@ esac
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "would install guard:  $GUARD"
     echo "would install hooks:  $HOOK_DIR/infinite-{stop,pretool,userprompt}.sh"
+    [ "$RESEARCH" -eq 1 ] && echo "would install built-in Book of Mormon research validator"
     echo "would update config:  $HOOKS_JSON"
     exit 0
 fi
@@ -210,11 +221,13 @@ fetch_or_copy scripts/infinite_state.py "$HOOK_DIR/infinite_state.py"
 if [ "$RESEARCH" -eq 1 ]; then
     fetch_or_copy scripts/infinite_research.py "$HOOK_DIR/infinite_research.py"
     chmod +x "$HOOK_DIR/infinite_research.py"
-    [ "$NO_GATES" -eq 0 ] && GATES+=("research:python3 .openhands/hooks/infinite_research.py --dir . validate")
+    # The research validator is built into the Stop hook for this profile. It is
+    # not a removable shell gate, so --no-gates still enforces the fixed task.
 fi
 chmod +x "$GUARD" "$HOOK_DIR"/infinite-*.sh "$HOOK_DIR/infinite_state.py" "$HOOK_DIR/infinite_guard.py"
 echo "installed guard:  $GUARD"
 echo "installed hooks:  $HOOK_DIR/infinite-{stop,pretool,userprompt}.sh"
+[ "$RESEARCH" -eq 1 ] && echo "research enforcement: built-in ledger/report validator + helper-only writes"
 
 # Build the policy now, so the hook command carries it.
 policy_args=(policy)
@@ -257,13 +270,14 @@ python = q(sys.executable or "python3")
 
 wanted = {
     "stop": f"bash .openhands/hooks/infinite-stop.sh --policy {q(policy)}",
-    "pre_tool_use": "bash .openhands/hooks/infinite-pretool.sh",
+    "pre_tool_use": f"bash .openhands/hooks/infinite-pretool.sh --policy {q(policy)}",
     "user_prompt_submit": f"bash .openhands/hooks/infinite-userprompt.sh --policy {q(policy)}",
 }
 # The Stop hook must outlive its gates; otherwise a long gate times out at the
 # hook layer and OpenHands treats it as a non-blocking error.
 gate_budget = sum(int(g.get("timeout", 600)) for g in policy_obj.get("gates", []))
-timeouts = {"stop": max(60, gate_budget + 15), "pre_tool_use": 20, "user_prompt_submit": 15}
+research_budget = 30 if policy_obj.get("profile") == "book-of-mormon" else 0
+timeouts = {"stop": max(60, gate_budget + research_budget + 15), "pre_tool_use": 20, "user_prompt_submit": 15}
 
 for event, command in wanted.items():
     entries = config.setdefault(event, [])
@@ -301,18 +315,28 @@ if [ "$ARM" -eq 1 ]; then
     echo "Check:  bash $0 --dir $TARGET_DIR --status"
     echo "Gates:  python3 $GUARD doctor --dir $TARGET_DIR"
 else
-    guard_cli arm --mode disabled >/dev/null 2>&1 || true
-    echo "installed but not armed. Arm with: bash $0 --dir $TARGET_DIR"
+    guard_cli arm "${policy_args[@]:1}" >/dev/null 2>&1 || true
+    echo "installed in ${MODE:-standby}. Arm by saying 'use this skill' / '/infinite', or run: bash $0 --dir $TARGET_DIR"
 fi
 
-# --- self-check: does a simulated finish attempt actually deny? ---------------
+# --- self-check: does a simulated finish attempt match the installed mode? ---
 SELFTEST="$(echo '{"event_type":"Stop"}' | OPENHANDS_PROJECT_DIR="$TARGET_DIR" bash "$HOOK_DIR/infinite-stop.sh" --policy "$POLICY" >/dev/null 2>&1; echo $?)"
-if [ "$ARM" -eq 1 ] && [ "$SELFTEST" != "2" ]; then
-    echo "WARNING: self-check failed - a finish attempt returned $SELFTEST, expected 2 (denied)." >&2
+EXPECTED=2
+case "${MODE:-required}" in
+    disabled|standby) EXPECTED=0 ;;
+esac
+if [ "$ARM" -eq 1 ] && [ "$SELFTEST" != "$EXPECTED" ]; then
+    echo "WARNING: self-check failed - a finish attempt returned $SELFTEST, expected $EXPECTED." >&2
     echo "Run 'bash $0 --dir $TARGET_DIR --status' and check .openhands/hooks.json." >&2
     exit 1
 fi
-[ "$ARM" -eq 1 ] && echo "self-check: finish attempt correctly denied (exit 2)"
+if [ "$ARM" -eq 1 ]; then
+    if [ "$EXPECTED" = "2" ]; then
+        echo "self-check: finish attempt correctly denied (exit 2)"
+    else
+        echo "self-check: finish attempt correctly allowed before arming (exit 0)"
+    fi
+fi
 
 echo
 echo "Ending infinite mode (the user's call, never the agent's):"

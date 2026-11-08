@@ -1,7 +1,7 @@
 {
   "name": "infinite",
-  "version": "1.2.0",
-  "description": "Single-purpose fixed prompt: say \"use this skill\" or /infinite to run the bundled Book of Mormon evidence-research task until stop, then compile two ranked reports.",
+  "version": "1.3.0",
+  "description": "Single-purpose fixed prompt with deterministic hook enforcement: say \"use this skill\" or /infinite to run the bundled Book of Mormon evidence-research task until stop, then compile two ranked reports.",
   "author": {
     "name": "caleb695"
   },
@@ -14,6 +14,7 @@
     "evidence",
     "book-of-mormon",
     "long-running",
-    "never-stop"
+    "never-stop",
+    "enforcement"
   ]
 }

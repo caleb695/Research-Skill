@@ -76,7 +76,7 @@ grep -q "round     : 1" < <(python3 "$STATE" --dir "$PROJ" status) && pass "log 
 python3 "$STATE" --dir "$PROJ" report | grep -q "| 1 |" && pass "report renders ledger" || fail "report"
 
 echo "== installer =="
-"$INSTALL" --dir "$PROJ" --gate "tests:test -f ok.txt" --gate "lint:true" >/dev/null 2>&1 || fail "install"
+"$INSTALL" --dir "$PROJ" --generic --gate "tests:test -f ok.txt" --gate "lint:true" >/dev/null 2>&1 || fail "install"
 for f in .openhands/guard/infinite_guard.py .openhands/hooks/infinite-stop.sh \
          .openhands/hooks/infinite-pretool.sh .openhands/hooks/infinite-userprompt.sh \
          .openhands/hooks.json; do
@@ -86,7 +86,7 @@ POLICY="$(policy_of "$PROJ")"
 [ -n "$POLICY" ] && pass "policy embedded in hook command" || fail "no embedded policy"
 
 BEFORE="$(cat "$PROJ/.openhands/hooks.json")"
-"$INSTALL" --dir "$PROJ" --gate "lint:true" >/dev/null 2>&1
+"$INSTALL" --dir "$PROJ" --generic --gate "lint:true" >/dev/null 2>&1
 COUNT="$(python3 -c "import json;print(len(json.load(open('$PROJ/.openhands/hooks.json'))['stop']))")"
 check "$COUNT" "1" "installer is idempotent"
 

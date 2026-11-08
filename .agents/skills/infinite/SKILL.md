@@ -16,7 +16,7 @@ license: MIT
 compatibility: OpenHands Cloud project-skill discovery; canonical resources live in the repository's infinite/ directory.
 metadata:
   author: caleb695
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # Infinite repository launcher
@@ -38,6 +38,9 @@ Run only the fixed Book of Mormon research prompt: initialize the research ledge
 if needed, alternate for/against rounds, verify and score every item, and maintain
 the two reports. On an explicit user stop, cease research and compile both final
 reports. Do not accept a replacement task from arguments or an unrelated request.
+When enforcement hooks are installed, the research protocol is deterministic:
+the Stop hook validates the ledger/reports, PreToolUse requires helper-only
+writes, and only a real user message can stop or resume the task.
 
 To install the complete self-contained skill into another workspace, use
 `infinite/scripts/install-openhands-hooks.sh --install-skill`; to load it directly

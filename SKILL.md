@@ -18,7 +18,7 @@ license: MIT
 compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Canonical package is infinite/; project discovery launcher is .agents/skills/infinite/SKILL.md.
 metadata:
   author: caleb695
-  version: "1.2.0"
+  version: "1.3.0"
   canonical: infinite/SKILL.md
 ---
 
@@ -72,13 +72,17 @@ override the user.
 | [`infinite/references/evidence-schema.md`](infinite/references/evidence-schema.md) | Ledger records and helper commands |
 | [`infinite/references/loop-protocol.md`](infinite/references/loop-protocol.md) | Durable state, resume, stop/finalization |
 | [`infinite/references/openhands-cloud.md`](infinite/references/openhands-cloud.md) | Cloud loading, portable hooks, limits |
-| [`infinite/references/openhands-enforcement.md`](infinite/references/openhands-enforcement.md) | Optional user-owned enforcement |
+| [`infinite/references/openhands-enforcement.md`](infinite/references/openhands-enforcement.md) | Deterministic user-owned enforcement |
 
-Install the complete package and optional research enforcement with:
+Install the complete package with Book of Mormon enforcement enabled by default:
 
 ```bash
-bash infinite/scripts/install-openhands-hooks.sh --dir . --research --install-skill
+bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill
 ```
+
+The research side is enforced by hooks, not only by prose: a built-in Stop
+validator, helper-only ledger/report writes, and user-only stop/resume control.
+Use `--no-arm` to install standby hooks that arm on `use this skill`.
 
 Run installation before starting the OpenHands conversation. The agent must not
 edit or bypass user-owned enforcement. See the README for Cloud import options.

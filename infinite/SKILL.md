@@ -14,10 +14,10 @@ triggers:
 - use infinite
 - /infinite
 license: MIT
-compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Helpers use python3 standard library; optional enforcement hooks use bash.
+compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Helpers use python3 standard library; enforcement hooks use bash.
 metadata:
   author: caleb695
-  version: "1.2.0"
+  version: "1.3.0"
   tags: [fixed-task, research, evidence, book-of-mormon, long-running]
 ---
 
@@ -82,8 +82,24 @@ Read these bundled resources relative to this skill directory:
 4. `references/loop-protocol.md` — durable state, resume, and stop behavior.
 
 For OpenHands Cloud installation and limits, read
-`references/openhands-cloud.md`. Optional enforcement is documented in
+`references/openhands-cloud.md`. Deterministic enforcement is documented in
 `references/openhands-enforcement.md`; never alter or bypass user-owned hooks.
+
+## Deterministic enforcement
+
+The Mormon research side is not only a prompt. The installer enables the
+Book of Mormon enforcement profile by default:
+
+- The Stop hook runs a built-in research validator. It checks the append-only
+  ledger, alternating rounds, evidence schema, scoring caps, duplicate keys,
+  cross-side references, and both report digests. `--no-gates` does not remove it.
+- The PreToolUse hook blocks hand-editing the ledger, state, generated reports,
+  or validating helpers; blocks `compile --final` before a real user stop; and
+  blocks arming/disarming by the agent.
+- The UserPromptSubmit hook is the only word channel that can arm, stop, or
+  resume the fixed task. A user stop requests final reports, not more research.
+- Install with `--no-arm` for standby hooks that arm when the user says
+  `use this skill` or `/infinite`. Without hooks, the skill remains advisory.
 
 ## Persistent workspace
 

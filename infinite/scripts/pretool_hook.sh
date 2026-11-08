@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # OpenHands PreToolUse hook for the `infinite` skill (thin dispatcher).
 #
-# Stops the agent from disabling its own enforcement: running the guard, the
-# installer, or the hooks; editing .openhands/guard or .openhands/hooks.json.
+# Stops the agent from disabling its own enforcement or faking the fixed
+# research task: running the guard/installer/hooks, editing enforcement state,
+# hand-editing the research ledger/reports, or compiling final reports before a
+# real user stop. "$@" may carry the installer's immutable policy.
 #
 #   exit 0  allow the tool call
 #   exit 2  deny the tool call
@@ -27,5 +29,5 @@ if [ -z "$guard" ] || ! command -v python3 >/dev/null 2>&1; then
     exit 0
 fi
 
-printf '%s' "$input" | python3 "$guard" pretool
+printf '%s' "$input" | python3 "$guard" pretool "$@"
 exit $?

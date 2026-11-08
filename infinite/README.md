@@ -36,11 +36,11 @@ never fabricated.
 - `references/evidence-schema.md` — JSON records and helper commands.
 - `references/loop-protocol.md` — durable state, resume, stop/finalization.
 - `references/openhands-cloud.md` — Cloud loading and portability checks.
-- `references/openhands-enforcement.md` — optional user-owned hooks.
+- `references/openhands-enforcement.md` — deterministic user-owned hooks.
 - `scripts/infinite_research.py` — stdlib ledger, scoring, dedup, validator, and
   two-report compiler.
 - `scripts/infinite_state.py` — round cursor, alternating side, dry-round count.
-- `scripts/infinite_guard.py` and hook dispatchers — optional enforcement.
+- `scripts/infinite_guard.py` and hook dispatchers — deterministic enforcement.
 
 The workspace receives `.infinite/` scratch state and two deliverables:
 `research/book-of-mormon-for.md` and `research/book-of-mormon-against.md`.
@@ -48,10 +48,10 @@ The workspace receives `.infinite/` scratch state and two deliverables:
 ## Install
 
 ```bash
-# complete skill + research enforcement; run before starting the conversation
-bash infinite/scripts/install-openhands-hooks.sh --dir . --research --install-skill
+# complete skill + Book of Mormon enforcement (default); run before the conversation
+bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill
 
-# skill only, no enforcement
+# standby hooks: arm later by saying "use this skill" or "/infinite"
 bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill --no-arm
 ```
 
@@ -67,12 +67,14 @@ use this skill
 ```
 
 Say `stop` to end research and compile both final reports. With research hooks,
-the stop message requests finalization and the gate waits for valid final reports
-rather than ordering more research. Say `continue` later to resume from the ledger.
+the stop message requests finalization and the built-in gate waits for valid final
+reports rather than ordering more research. The agent cannot hand-edit the ledger
+or reports, compile final reports before the stop, or disarm itself. Say
+`continue` later to resume from the ledger.
 
 ## Requirements and limits
 
-Python 3 standard library for helpers; bash for optional hooks; an agent with
+Python 3 standard library for helpers; bash for enforcement hooks; an agent with
 web/browser access for online research. The skill does not grant network access.
 OpenHands iteration/budget/context limits still apply; checkpoint and resume.
 Scores are ordinal research judgments, not probabilities of truth. The validator

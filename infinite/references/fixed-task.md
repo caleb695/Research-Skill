@@ -41,3 +41,6 @@ Note that people can lie and people can be wrong so don’t take everything at f
   alternating for/against rounds, authentication, context/POV, one overall score,
   deduplication, cross-side evaluation, durable ledger, and two ranked reports on
   stop. It does not authorize a different task.
+- The research side is backed by deterministic enforcement when hooks are
+  installed: a built-in Stop validator, helper-only ledger/report writes, and
+  user-only stop/resume control. The prompt is not the only enforcement layer.

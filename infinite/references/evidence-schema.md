@@ -56,10 +56,12 @@ python3 "$H" --dir . status
 python3 "$H" --dir . compile   # new interim snapshot; preserve the ledger
 ```
 
-Do not use `--final` to escape the loop. With optional research enforcement, the
-user-stop hook writes a user-owned `STOP_REQUESTED` marker; the Stop gate then
-requires final reports whose digest matches the ledger. `--disarm` remains the
-user's emergency override.
+Do not use `--final` to escape the loop. With research enforcement, the
+user-stop hook writes a user-owned `STOP_REQUESTED` marker; PreToolUse blocks
+`compile --final` before that marker exists, and the built-in Stop gate requires
+final reports whose digest matches the ledger. Ledger, state, reports, and
+validating helpers are helper-only writes; hand edits are denied. `--disarm`
+remains the user's emergency override.
 
 ## Evidence record
 

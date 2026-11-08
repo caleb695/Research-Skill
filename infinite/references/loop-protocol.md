@@ -20,6 +20,7 @@ iteration cap does not erase findings. This skill runs only the prompt in
 ├── config.json       mirror of the loaded policy
 ├── attempts.json     finish-attempt history
 ├── DISARMED          generic stop or user override
+├── ARMED             standby hooks armed by a real fixed invocation
 ├── STOP_REQUESTED    research stop; final reports still required
 └── events.jsonl      arm/disarm/deny audit trail
 ```
@@ -75,8 +76,10 @@ A round record looks like:
 
 Append only. Never rewrite history to look better. If a source was wrong, append
 a revision and keep the rejected/corrected trail. Do not log a check you did not
-perform. If scripts are unavailable, maintain the same fields by hand and keep
-the two reports current; do not silently drop findings.
+perform. With enforcement hooks installed, ledger/report writes must go through
+the validating helpers; hand edits are denied. If scripts are unavailable and no
+hooks are installed, maintain the same fields by hand and keep the two reports
+current; do not silently drop findings.
 
 ## Resuming
 

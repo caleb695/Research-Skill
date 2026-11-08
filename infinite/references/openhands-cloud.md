@@ -48,17 +48,17 @@ The skill does not grant network access. If the Cloud environment restricts
 hosts, lacks a browser, or hits a paywall, record the limitation and use accessible
 primary texts/other source classes. Never pretend a blocked source was checked.
 
-## Optional enforcement in Cloud
+## Deterministic enforcement in Cloud
 
 Install from a terminal/setup environment **before starting the conversation**:
 
 ```bash
-bash infinite/scripts/install-openhands-hooks.sh --dir . --research --install-skill
+bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill
 ```
 
 This installs the complete skill, copies the research validator beside the hooks,
-adds a `research` gate, initializes the two reports, and writes hooks with
-**repo-relative commands** such as:
+enables the built-in Book of Mormon Stop gate, initializes the two reports, and
+writes hooks with **repo-relative commands** such as:
 
 ```json
 {
@@ -69,18 +69,22 @@ adds a `research` gate, initializes the two reports, and writes hooks with
 }
 ```
 
-The exact timeout is derived from configured gate budgets so the hook does not
-time out before its gates. Commit the generated `.openhands/hooks.json` and hook
+The exact timeout is derived from configured gate budgets plus the built-in
+research validator so the hook does not time out before its gates. Commit the
+generated `.openhands/hooks.json` and hook
 scripts if you want the wiring to travel with the repository; keep
 `.openhands/guard/` and `.infinite/` scratch state out of Git. Do not commit a
 policy containing secrets. Start a new conversation after installation because
 hooks are loaded at conversation start.
 
-The installer's embedded policy is fixed for that loaded hook command. The agent
-cannot weaken it by editing the on-disk mirror. User stop in research mode writes
-`STOP_REQUESTED`; the gate then blocks finishing only until both final reports are
-compiled and validated. It does not order more research. The user can always run
-the installer with `--disarm` or `--uninstall` from their own terminal.
+The installer's embedded policy is fixed for that loaded hook command and is
+passed to Stop, PreToolUse, and UserPromptSubmit. The agent cannot weaken it by
+editing the on-disk mirror. User stop in research mode writes `STOP_REQUESTED`;
+the gate then blocks finishing only until both final reports are compiled and
+validated. It does not order more research. PreToolUse blocks hand-editing the
+ledger/reports/helpers and blocks `compile --final` before that user stop. Use
+`--no-arm` for standby hooks that arm on `use this skill`. The user can always
+run the installer with `--disarm` or `--uninstall` from their own terminal.
 
 Without hooks, the skill still runs as instructions and the agent must obey the
 stop/final-report protocol. Cloud iteration/budget limits still end a run; the

@@ -269,7 +269,7 @@ def main() -> int:
         project.mkdir()
         install = SKILL_DIR / "scripts" / "install-openhands-hooks.sh"
         proc = subprocess.run(
-            ["bash", str(install), "--dir", str(project), "--gate", "tests:true"],
+            ["bash", str(install), "--dir", str(project), "--generic", "--gate", "tests:true"],
             capture_output=True,
             text=True,
         )
@@ -389,6 +389,9 @@ def main() -> int:
     check(code == 0, "a real 'stop' message lets the finish through", str(code))
 
     pre_cmd = config["pre_tool_use"][0]["hooks"][0]["command"]
+    check("--policy" in pre_cmd, "PreToolUse hook carries the immutable policy")
+    prompt_cmd = config["user_prompt_submit"][0]["hooks"][0]["command"]
+    check("--policy" in prompt_cmd, "UserPromptSubmit hook carries the immutable policy")
     deny_payload = {
         "event_type": "PreToolUse",
         "tool_name": "terminal",

@@ -227,18 +227,95 @@ class ResearchTests(unittest.TestCase):
         self.assertIn("fabricated", content)
         self.assertEqual(research.store(self.project)["evidence"]["F900"]["overall_score"], 0.0)
 
-    def hook(self, project, event, message=None):
+    def hook(self, project, event, message=None, tool_name=None, tool_input=None):
         config = json.loads((project / ".openhands/hooks.json").read_text())
-        key = {"stop": "stop", "prompt": "user_prompt_submit"}[event]
+        key = {"stop": "stop", "prompt": "user_prompt_submit", "pretool": "pre_tool_use"}[event]
         command = config[key][0]["hooks"][0]["command"]
-        payload = {"event_type": "Stop" if event == "stop" else "UserPromptSubmit", "working_dir": str(project), "session_id": "test"}
+        payload = {"event_type": {"stop": "Stop", "prompt": "UserPromptSubmit", "pretool": "PreToolUse"}[event],
+                   "working_dir": str(project), "session_id": "test"}
         if message is not None:
             payload["message"] = message
+        if tool_name is not None:
+            payload["tool_name"] = tool_name
+            payload["tool_input"] = tool_input or {}
         env = dict(os.environ, OPENHANDS_PROJECT_DIR=str(project))
         return subprocess.run(command, shell=True, cwd=project, env=env, input=json.dumps(payload), capture_output=True, text=True, timeout=60)
 
+    def test_research_pretool_blocks_faking_the_mormon_side(self):
+        proc = subprocess.run(["bash", str(INSTALL), "--dir", str(self.project), "--install-skill", "--no-gates"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        attacks = [
+            ("terminal", {"command": "echo '{}' > .infinite/ledger.jsonl"}),
+            ("terminal", {"command": "python3 -c \"open('.infinite/state.json','w').write('{}')\""}),
+            ("terminal", {"command": "sed -i 's/FINAL/INTERIM/' research/book-of-mormon-for.md"}),
+            ("file_editor", {"path": "research/book-of-mormon-against.md", "command": "str_replace", "old_str": "a", "new_str": "b"}),
+            ("file_editor", {"path": ".agents/skills/infinite/scripts/infinite_research.py", "command": "str_replace", "old_str": "a", "new_str": "b"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . compile --final"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_state.py --dir . disarm"}),
+        ]
+        for tool_name, tool_input in attacks:
+            result = self.hook(self.project, "pretool", tool_name=tool_name, tool_input=tool_input)
+            self.assertEqual(result.returncode, 2, f"{tool_input}: {result.stdout + result.stderr}")
+        allowed = [
+            ("read_file", {"path": ".infinite/ledger.jsonl"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . status"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . validate"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_state.py --dir . status"}),
+        ]
+        for tool_name, tool_input in allowed:
+            result = self.hook(self.project, "pretool", tool_name=tool_name, tool_input=tool_input)
+            self.assertEqual(result.returncode, 0, f"{tool_input}: {result.stdout + result.stderr}")
+        # A real user stop switches the helper from research to finalization.
+        self.hook(self.project, "prompt", "stop")
+        result = self.hook(self.project, "pretool", tool_name="terminal", tool_input={"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . compile --final"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.hook(self.project, "pretool", tool_name="terminal", tool_input={"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . search --side for --query x --outcome no-new --notes y"})
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.hook(self.project, "prompt", "continue")
+        self.assertFalse((self.project / ".openhands/guard/STOP_REQUESTED").exists())
+        result = self.hook(self.project, "pretool", tool_name="terminal", tool_input={"command": "python3 .agents/skills/infinite/scripts/infinite_state.py --dir . resume"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_standby_hooks_arm_only_on_a_real_fixed_invocation(self):
+        proc = subprocess.run(["bash", str(INSTALL), "--dir", str(self.project), "--install-skill", "--no-arm"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        config = json.loads((self.project / ".openhands/guard/config.json").read_text())
+        self.assertEqual(config["mode"], "standby")
+        self.assertEqual(config["profile"], "book-of-mormon")
+        self.assertEqual(self.hook(self.project, "stop").returncode, 0)
+        self.hook(self.project, "prompt", "do not use this skill")
+        self.assertEqual(self.hook(self.project, "stop").returncode, 0)
+        self.hook(self.project, "prompt", "use this skill")
+        self.assertTrue((self.project / ".openhands/guard/ARMED").is_file())
+        result = self.hook(self.project, "stop")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("next for round", result.stdout)
+        self.hook(self.project, "prompt", "stop")
+        self.run_py(RESEARCH, "compile", "--final")
+        result = self.hook(self.project, "stop")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.project / ".openhands/guard/ARMED").exists())
+        self.assertFalse((self.project / ".openhands/guard/STOP_REQUESTED").exists())
+
+    def test_research_validator_is_builtin_even_with_no_gates(self):
+        proc = subprocess.run(["bash", str(INSTALL), "--dir", str(self.project), "--install-skill", "--no-gates"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        config = json.loads((self.project / ".openhands/guard/config.json").read_text())
+        self.assertEqual(config["profile"], "book-of-mormon")
+        self.assertEqual(config["gates"], [])
+        self.hook(self.project, "prompt", "stop")
+        result = self.hook(self.project, "stop")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("research-validator", result.stdout)
+        self.assertIn("final reports are not ready", result.stdout)
+        self.run_py(RESEARCH, "compile", "--final")
+        result = self.hook(self.project, "stop")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_research_hooks_stop_finalization_and_cloud_relocation(self):
-        proc = subprocess.run(["bash", str(INSTALL), "--dir", str(self.project), "--research", "--install-skill"], capture_output=True, text=True)
+        # The fixed skill installs Book of Mormon enforcement by default; no
+        # separate --research flag is required for the Mormon side.
+        proc = subprocess.run(["bash", str(INSTALL), "--dir", str(self.project), "--install-skill"], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertTrue((self.project / ".agents/skills/infinite/scripts/infinite_research.py").is_file())
         self.assertTrue((self.project / ".agents/skills/infinite/references/fixed-task.md").is_file())
@@ -246,6 +323,8 @@ class ResearchTests(unittest.TestCase):
         stop_cmd = config["stop"][0]["hooks"][0]["command"]
         self.assertTrue(stop_cmd.startswith("bash .openhands/hooks/"))
         self.assertNotIn(str(self.project), stop_cmd)
+        pre_cmd = config["pre_tool_use"][0]["hooks"][0]["command"]
+        self.assertIn("--policy", pre_cmd)
         result = self.hook(self.project, "stop")
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("next for round", result.stdout)
