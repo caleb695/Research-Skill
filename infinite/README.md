@@ -2,7 +2,8 @@
 
 A single-purpose Infinite skill. It runs one fixed bundled prompt: keep
 researching evidence for and against the Book of Mormon until the user says stop,
-then compile two ranked reports. The user only has to say `use this skill` or
+then compile three ranked reports (for, against, head-to-head comparison) mirrored
+to Google Docs. The user only has to say `use this skill` or
 `/infinite`; no task arguments are required or accepted as a replacement task.
 
 ## Trigger
@@ -20,7 +21,7 @@ These start or resume the fixed prompt in `references/fixed-task.md`.
 5. Deduplicate by underlying observation; rate credibility, accuracy, relevance,
    and usefulness with reasons; compute one overall Evidence Impact Score.
 6. Compare against the other side, record evidence/claim/search events, log the
-   round, compile both reports, validate, and continue.
+   round, compile all three reports, sync Google Docs, validate, and continue.
 
 Three nonproductive rounds trigger deeper primary-text/dependency work; six
 trigger review of uncertain and confident claims. Original synthesis is labeled
@@ -35,15 +36,22 @@ never fabricated.
   category playbook, adversarial comparison, deepening.
 - `references/evidence-schema.md` — JSON records and helper commands.
 - `references/loop-protocol.md` — durable state, resume, stop/finalization.
+- `references/google-docs.md` — Google Docs deliverables, Google Cloud Console
+  credential links, sync commands, enforcement.
 - `references/openhands-cloud.md` — Cloud loading and portability checks.
 - `references/openhands-enforcement.md` — deterministic user-owned hooks.
 - `scripts/infinite_research.py` — stdlib ledger, scoring, dedup, validator, and
-  two-report compiler.
+  three-report compiler with the six-step evidence validator.
+- `scripts/google_docs.py` — stdlib Google Docs mirror (OAuth refresh token or
+  service account) for the three reports; writes the sync receipt the final
+  validator requires.
 - `scripts/infinite_state.py` — round cursor, alternating side, dry-round count.
 - `scripts/infinite_guard.py` and hook dispatchers — deterministic enforcement.
 
-The workspace receives `.infinite/` scratch state and two deliverables:
-`research/book-of-mormon-for.md` and `research/book-of-mormon-against.md`.
+The workspace receives `.infinite/` scratch state and three deliverables:
+`research/book-of-mormon-for.md`, `research/book-of-mormon-against.md`, and
+`research/book-of-mormon-comparison.md` — all three mirrored to Google Docs
+created with the user's own Google API credentials.
 
 ## Install
 
@@ -66,7 +74,8 @@ Hook commands are repo-relative so a Cloud checkout path does not break them.
 use this skill
 ```
 
-Say `stop` to end research and compile both final reports. With research hooks,
+Say `stop` to end research and compile all three final reports plus the final
+Google Docs sync. With research hooks,
 the stop message requests finalization and the built-in gate waits for valid final
 reports rather than ordering more research. The agent cannot hand-edit the ledger
 or reports, compile final reports before the stop, or disarm itself. Say

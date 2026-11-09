@@ -30,34 +30,63 @@ sys.modules[spec.name] = research
 spec.loader.exec_module(research)
 
 
-def evidence(eid="F001", side="for", identity="A distinct checked observation", verdict="verified", opposing=None):
+def source(sid="S1", group="fixture-chain-a", slug="fixture-a", locator="fixture line 1", role="evidence"):
     return {
-        "id": eid, "side": side, "category": "bible", "title": f"Fixture {eid}",
-        "identity": identity, "aliases": [],
-        "proposition": "A synthetic observation used only to test the ledger.",
-        "inference": "This fixture tests structure, not a historical conclusion.",
-        "assumptions": ["Synthetic test fixture; not evidence about the Book of Mormon."],
-        "dependence": "Single synthetic source chain.",
-        "uncertainty": "Not a real research finding.",
-        "authenticity": {"verdict": verdict, "checks": ["Structural fixture created by the test suite."], "limitations": "Illustrative only."},
-        "context": {"textual": "Whole synthetic unit reviewed.", "historical": "Synthetic test context.", "pov": "Test author; no religious POV.", "missing_facts": "No real-world facts are asserted."},
-        "sources": [{"id": "S1", "title": "Synthetic primary fixture", "reference": "Test suite fixture, not a publication", "url": "https://example.org/fixture", "locator": "fixture line 1", "accessed": "2026-11-07", "kind": "test-fixture", "independence_group": "fixture", "bias": "none; synthetic", "verification": "Created by this test; not an online historical check."}],
-        "scores": {"credibility": 80, "accuracy": 90, "relevance": 70, "usefulness": 60},
-        "score_reasons": {d: f"Fixture rationale for {d}." for d in research.DIMENSIONS},
-        "counter_evaluation": {"analysis": "A synthetic alternative is considered; this is not a real evidential judgment.", "opposing_ids": opposing or [], "source_ids": ["S1"]},
+        "id": sid, "title": f"Synthetic primary fixture {sid}",
+        "reference": f"Test suite fixture {sid}, edition 1, published by the test harness for structural checks",
+        "url": f"https://example.org/{slug}", "locator": locator, "accessed": "2026-11-07",
+        "kind": "test-fixture", "role": role, "independence_group": group,
+        "bias": "none; synthetic fixture created for schema testing only",
+        "verification": "Created and compared by this test suite; not an online historical check.",
     }
 
 
-def claim(cid="C001", side="for", eids=None, opposing=None):
+def evidence(eid="F001", side="for", identity="A distinct checked observation", verdict="verified", opposing=None, category="bible"):
     return {
-        "id": cid, "side": side, "category": "bible", "title": f"Fixture claim {cid}",
-        "statement": "A synthetic claim for testing report organization.",
-        "synthesis": "The fixture demonstrates how evidence is grouped without counting duplicates as independent support.",
+        "id": eid, "side": side, "category": category, "title": f"Fixture {eid}",
+        "identity": identity, "aliases": [],
+        "proposition": "A synthetic observation used only to test the ledger mechanics, not a historical claim.",
+        "inference": "This fixture exercises the six-step schema validation rather than any conclusion about the Book of Mormon.",
+        "assumptions": ["Synthetic test fixture; not evidence about the Book of Mormon."],
+        "dependence": "Two synthetic independent fixture chains with no shared manuscript or author.",
+        "uncertainty": "Not a real research finding; structure only, and this is stated explicitly.",
+        "authenticity": {"verdict": verdict, "checks": [
+            "Earliest accessible edition located and bibliographically described in full",
+            "Exact wording and locator compared against the fixture original line by line",
+            "Correction/retraction/forgery search performed with recorded negative results"],
+            "limitations": "Illustrative fixture only; no real provenance exists behind it."},
+        "context": {
+            "textual": "Whole synthetic literary unit reviewed including neighboring verses and the chapter argument.",
+            "historical": "Synthetic test context with dates, actors, and sequence fully described for the fixture.",
+            "pov": "Test author with no religious POV; incentives and audience documented as part of the fixture.",
+            "missing_facts": "No real-world facts are asserted; this notes what would change interpretation if real."},
+        "sources": [source("S1"), source("S2", "fixture-chain-b", "fixture-b", "fixture line 2")],
+        "corroboration": {
+            "cross_checks": "Fixture A and fixture B were compared line by line; they agree on the synthetic observation and no discrepancies were found.",
+            "cited_evidence": [
+                {"source_id": "S1", "piece": "fixture line 1 exact wording", "what_it_shows": "Establishes the synthetic observation in chain A."},
+                {"source_id": "S2", "piece": "fixture line 2 exact wording", "what_it_shows": "Independently repeats the observation in chain B."}]},
+        "scores": {"credibility": 80, "accuracy": 90, "relevance": 70, "usefulness": 60},
+        "score_reasons": {d: f"Fixture rationale for {d} with enough substance to satisfy the coded minimum." for d in research.DIMENSIONS},
+        "counter_evaluation": {"analysis": "The strongest synthetic alternative is considered in full, including its effect on the item and the residual uncertainty that remains after the comparison; this is not a real evidential judgment.", "opposing_ids": opposing or [], "source_ids": ["S1"]},
+        "investigation": {
+            "queries": ["fixture schema validation", "fixture independence group test"],
+            "sources_consulted": 2,
+            "rejected_leads": "A third fixture chain was considered and rejected as an exact duplicate of chain A.",
+            "depth": "Both fixtures were read in full, traced to their generating test code, and cross-checked against each other."},
+    }
+
+
+def claim(cid="C001", side="for", eids=None, opposing=None, category="bible"):
+    return {
+        "id": cid, "side": side, "category": category, "title": f"Fixture claim {cid}",
+        "statement": "A synthetic claim for testing report organization and ranking mechanics.",
+        "synthesis": "The fixture demonstrates how evidence is grouped under claims without counting duplicates as independent support, and it explains the whole argument rather than summing parts.",
         "evidence_ids": eids or ["F001"], "assumptions": ["Synthetic fixture."],
-        "dependence": "One fixture chain.", "uncertainty": "No historical conclusion.",
+        "dependence": "One fixture chain pair.", "uncertainty": "No historical conclusion is drawn from this fixture.",
         "scores": {"credibility": 75, "accuracy": 85, "relevance": 65, "usefulness": 55},
-        "score_reasons": {d: f"Fixture claim rationale for {d}." for d in research.DIMENSIONS},
-        "counter_evaluation": {"analysis": "The strongest synthetic alternative is acknowledged for testing.", "opposing_ids": opposing or [], "source_ids": []},
+        "score_reasons": {d: f"Fixture claim rationale for {d} with enough substance to satisfy the coded minimum." for d in research.DIMENSIONS},
+        "counter_evaluation": {"analysis": "The strongest synthetic alternative is acknowledged in full for testing, including its effect on the claim and the residual uncertainty that remains after the comparison.", "opposing_ids": opposing or [], "source_ids": []},
     }
 
 
@@ -86,6 +115,19 @@ class ResearchTests(unittest.TestCase):
     def init(self):
         self.run_py(RESEARCH, "init")
 
+    def write_receipt(self, mode="final"):
+        """Simulate a successful google_docs.py sync at the current ledger digest."""
+        digest = research.ledger_digest(self.project)
+        receipt = {
+            "auth": "oauth-refresh",
+            "documents": {name: {"id": f"doc-{name}", "title": name,
+                                 "url": f"https://docs.google.com/document/d/doc-{name}/edit"}
+                          for name in ("for", "against", "comparison")},
+            "last_sync": {"ts": "2026-11-09T00:00:00+00:00", "mode": mode, "digest": digest,
+                          "documents_synced": ["for", "against", "comparison"]},
+        }
+        (self.project / ".infinite/gdocs.json").write_text(json.dumps(receipt), encoding="utf-8")
+
     def add_evidence(self, record, revise=False, ok=True):
         return self.run_py(RESEARCH, "revise" if revise else "evidence", "--file", self.write_record(record), ok=ok)
 
@@ -98,7 +140,7 @@ class ResearchTests(unittest.TestCase):
             args += ["--evidence-id", eid]
         return self.run_py(STATE, *args, ok=ok)
 
-    def test_init_is_idempotent_and_creates_two_reports(self):
+    def test_init_is_idempotent_and_creates_three_reports(self):
         self.init()
         self.log("for", "no-new")
         before = json.loads((self.project / ".infinite/state.json").read_text())
@@ -107,11 +149,12 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(after["round"], before["round"])
         self.assertEqual(after["next_side"], "against")
         self.assertEqual(after["dry_rounds"], 1)
-        for side in ("for", "against"):
-            path = self.project / f"research/book-of-mormon-{side}.md"
+        for name in ("for", "against", "comparison"):
+            path = self.project / f"research/book-of-mormon-{name}.md"
             self.assertTrue(path.is_file())
             self.assertIn("INTERIM", path.read_text())
-        self.run_py(RESEARCH, "validate")
+        proc = self.run_py(RESEARCH, "validate")
+        self.assertIn("Google Docs", proc.stdout + proc.stderr)  # warning until configured
 
     def test_score_formula_and_provenance_caps(self):
         item = evidence()
@@ -193,6 +236,7 @@ class ResearchTests(unittest.TestCase):
         proc = self.run_py(RESEARCH, "validate", "--final", ok=False)
         self.assertIn("not final", proc.stderr)
         self.run_py(RESEARCH, "compile", "--final")
+        self.write_receipt("final")
         self.run_py(RESEARCH, "validate", "--final")
         for side in ("for", "against"):
             content = (self.project / f"research/book-of-mormon-{side}.md").read_text()
@@ -200,21 +244,113 @@ class ResearchTests(unittest.TestCase):
             self.assertIn("Category ranking", content)
             self.assertIn("Opposing-evidence evaluation", content)
             self.assertIn("Overall claim ranking", content)
+        comparison = (self.project / "research/book-of-mormon-comparison.md").read_text()
+        self.assertIn("FINAL snapshot", comparison)
+        self.assertIn("F001 (for) vs A001 (against)", comparison)
+        self.assertIn("Category face-offs", comparison)
+        self.assertIn("Complete ranked evidence register", comparison)
         self.run_py(RESEARCH, "search", "--side", "against", "--query", "later fixture", "--outcome", "no-new", "--notes", "Makes reports stale.")
         proc = self.run_py(RESEARCH, "validate", ok=False)
         self.assertIn("stale", proc.stderr)
         self.run_py(RESEARCH, "compile", "--final")
+        self.write_receipt("final")
         self.run_py(RESEARCH, "validate", "--final")
 
     def test_final_requires_usable_evidence_to_be_organized(self):
         self.init()
         self.add_evidence(evidence())
         self.run_py(RESEARCH, "compile", "--final")
+        self.write_receipt("final")
         proc = self.run_py(RESEARCH, "validate", "--final", ok=False)
         self.assertIn("not organized under a claim", proc.stderr)
         self.add_claim(claim())
         self.run_py(RESEARCH, "compile", "--final")
+        self.write_receipt("final")
         self.run_py(RESEARCH, "validate", "--final")
+
+    def test_six_prompt_steps_are_code_enforced(self):
+        """Each numbered step of the fixed prompt rejects partial work."""
+        self.init()
+
+        def rejected(mutate, eid, needle):
+            item = evidence(eid, identity=f"distinct identity {eid}")
+            mutate(item)
+            proc = self.add_evidence(item, ok=False)
+            self.assertIn(needle, proc.stderr)
+
+        # Step 1: at least three substantive authenticity checks.
+        rejected(lambda i: i["authenticity"]["checks"].pop(), "F101", "prompt step 1")
+        # Step 2: full context, not one-liners.
+        rejected(lambda i: i["context"].update(pov="biased"), "F102", "prompt step 2")
+        # Step 3: multiple sources, multiple independence groups, multiple cited pieces.
+        rejected(lambda i: i["sources"].pop(), "F103", "prompt step 3")
+        rejected(lambda i: i["sources"][1].update(independence_group="fixture-chain-a"), "F104", "prompt step 3")
+        rejected(lambda i: i["corroboration"]["cited_evidence"].pop(), "F105", "prompt step 3")
+        rejected(lambda i: i.pop("corroboration"), "F106", "prompt step 3")
+        # Biased/lead-only sources cannot carry a verified item.
+        rejected(lambda i: i["sources"][1].update(role="lead-only"), "F107", "prompt step 3")
+        # Step 4: substantive counter analysis.
+        rejected(lambda i: i["counter_evaluation"].update(analysis="Critics disagree."), "F108", "prompt step 4")
+        # Step 5: every dimension needs a specific reason.
+        rejected(lambda i: i["score_reasons"].update(credibility="solid"), "F109", "prompt step 5")
+        # Step 6: extensive research record.
+        rejected(lambda i: i.pop("investigation"), "F110", "prompt step 6")
+        rejected(lambda i: i["investigation"].update(queries=["one"]), "F111", "prompt step 6")
+        rejected(lambda i: i["investigation"].update(sources_consulted=1), "F112", "prompt step 6")
+        # A complete item still passes, and quarantined leads may use one source.
+        self.add_evidence(evidence("F100", identity="A complete six-step fixture"))
+        lead = evidence("F200", identity="A quarantined single-source lead", verdict="unverified")
+        lead["sources"].pop()
+        lead["corroboration"]["cited_evidence"].pop()
+        self.add_evidence(lead)
+        self.assertEqual(research.store(self.project)["evidence"]["F200"]["overall_score"], 49.0)
+
+    def test_witnesses_category_is_capped_weighed_less(self):
+        self.init()
+        item = evidence("F300", identity="A witnesses-category fixture", category="witnesses")
+        self.add_evidence(item)
+        stored = research.store(self.project)["evidence"]["F300"]
+        self.assertEqual(stored["overall_score"], 69.0)  # capped, not 76.8
+        item = evidence("F301", identity="Another witnesses fixture with disputed verdict",
+                        category="witnesses", verdict="disputed")
+        self.add_evidence(item)
+        self.assertEqual(research.store(self.project)["evidence"]["F301"]["overall_score"], 69.0)
+        claim_item = claim("C300", category="witnesses", eids=["F300"])
+        self.add_claim(claim_item)
+        # Uncapped the claim would score 71.7; the witnesses ceiling brings it to 69.
+        self.assertEqual(research.store(self.project)["claims"]["C300"]["overall_score"], 69.0)
+
+    def test_final_requires_synced_google_docs(self):
+        self.init()
+        self.add_evidence(evidence())
+        self.add_claim(claim())
+        self.run_py(RESEARCH, "compile", "--final")
+        proc = self.run_py(RESEARCH, "validate", "--final", ok=False)
+        self.assertIn("Google Docs deliverables are missing", proc.stderr)
+        self.assertIn("console.cloud.google.com", proc.stderr)
+        self.write_receipt("interim")
+        proc = self.run_py(RESEARCH, "validate", "--final", ok=False)
+        self.assertIn("interim mode", proc.stderr)
+        self.write_receipt("final")
+        self.run_py(RESEARCH, "validate", "--final")
+        # A later ledger change makes the Google Docs stale too.
+        self.run_py(RESEARCH, "note", "--side", "for", "--kind", "method-limit", "--text", "later change")
+        proc = self.run_py(RESEARCH, "validate", "--final", ok=False)
+        self.assertIn("stale", proc.stderr)
+        self.run_py(RESEARCH, "compile", "--final")
+        self.write_receipt("final")
+        self.run_py(RESEARCH, "validate", "--final")
+        # The user-only escape hatch skips the requirement.
+        env_backup = os.environ.get("INFINITE_GDOCS")
+        os.environ["INFINITE_GDOCS"] = "off"
+        try:
+            (self.project / ".infinite/gdocs.json").unlink()
+            self.run_py(RESEARCH, "validate", "--final")
+        finally:
+            if env_backup is None:
+                os.environ.pop("INFINITE_GDOCS", None)
+            else:
+                os.environ["INFINITE_GDOCS"] = env_backup
 
     def test_rejected_lead_is_preserved_with_zero_score(self):
         self.init()
@@ -248,10 +384,16 @@ class ResearchTests(unittest.TestCase):
             ("terminal", {"command": "echo '{}' > .infinite/ledger.jsonl"}),
             ("terminal", {"command": "python3 -c \"open('.infinite/state.json','w').write('{}')\""}),
             ("terminal", {"command": "sed -i 's/FINAL/INTERIM/' research/book-of-mormon-for.md"}),
+            ("terminal", {"command": "sed -i 's/FINAL/INTERIM/' research/book-of-mormon-comparison.md"}),
             ("file_editor", {"path": "research/book-of-mormon-against.md", "command": "str_replace", "old_str": "a", "new_str": "b"}),
             ("file_editor", {"path": ".agents/skills/infinite/scripts/infinite_research.py", "command": "str_replace", "old_str": "a", "new_str": "b"}),
+            ("file_editor", {"path": ".agents/skills/infinite/scripts/google_docs.py", "command": "str_replace", "old_str": "a", "new_str": "b"}),
             ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . compile --final"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/google_docs.py --dir . sync --mode final"}),
             ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_state.py --dir . disarm"}),
+            ("terminal", {"command": "echo '{\"documents\":{}}' > .infinite/gdocs.json"}),
+            ("file_editor", {"path": ".infinite/gdocs.json", "command": "create", "file_text": "{}"}),
+            ("file_editor", {"path": ".infinite/gdocs-oauth.json", "command": "create", "file_text": "{}"}),
         ]
         for tool_name, tool_input in attacks:
             result = self.hook(self.project, "pretool", tool_name=tool_name, tool_input=tool_input)
@@ -261,6 +403,8 @@ class ResearchTests(unittest.TestCase):
             ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . status"}),
             ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . validate"}),
             ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_state.py --dir . status"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/google_docs.py --dir . status"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/google_docs.py --dir . sync"}),
         ]
         for tool_name, tool_input in allowed:
             result = self.hook(self.project, "pretool", tool_name=tool_name, tool_input=tool_input)
@@ -268,6 +412,8 @@ class ResearchTests(unittest.TestCase):
         # A real user stop switches the helper from research to finalization.
         self.hook(self.project, "prompt", "stop")
         result = self.hook(self.project, "pretool", tool_name="terminal", tool_input={"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . compile --final"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.hook(self.project, "pretool", tool_name="terminal", tool_input={"command": "python3 .agents/skills/infinite/scripts/google_docs.py --dir . sync --mode final"})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         result = self.hook(self.project, "pretool", tool_name="terminal", tool_input={"command": "python3 .agents/skills/infinite/scripts/infinite_research.py --dir . search --side for --query x --outcome no-new --notes y"})
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
@@ -292,6 +438,7 @@ class ResearchTests(unittest.TestCase):
         self.assertIn("next for round", result.stdout)
         self.hook(self.project, "prompt", "stop")
         self.run_py(RESEARCH, "compile", "--final")
+        self.write_receipt("final")
         result = self.hook(self.project, "stop")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((self.project / ".openhands/guard/ARMED").exists())
@@ -309,6 +456,7 @@ class ResearchTests(unittest.TestCase):
         self.assertIn("research-validator", result.stdout)
         self.assertIn("final reports are not ready", result.stdout)
         self.run_py(RESEARCH, "compile", "--final")
+        self.write_receipt("final")
         result = self.hook(self.project, "stop")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -347,6 +495,7 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("final reports are not ready", result.stdout)
         self.run_py(RESEARCH, "compile", "--final")
+        self.write_receipt("final")
         result = self.hook(self.project, "stop")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         result = self.hook(self.project, "prompt", "use this skill")

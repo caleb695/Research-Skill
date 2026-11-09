@@ -57,7 +57,7 @@ bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill
 ```
 
 This installs the complete skill, copies the research validator beside the hooks,
-enables the built-in Book of Mormon Stop gate, initializes the two reports, and
+enables the built-in Book of Mormon Stop gate, initializes the three reports, and
 writes hooks with **repo-relative commands** such as:
 
 ```json
@@ -80,8 +80,8 @@ hooks are loaded at conversation start.
 The installer's embedded policy is fixed for that loaded hook command and is
 passed to Stop, PreToolUse, and UserPromptSubmit. The agent cannot weaken it by
 editing the on-disk mirror. User stop in research mode writes `STOP_REQUESTED`;
-the gate then blocks finishing only until both final reports are compiled and
-validated. It does not order more research. PreToolUse blocks hand-editing the
+the gate then blocks finishing only until all three final reports are compiled and
+validated and the three Google Docs are synced at the final digest. It does not order more research. PreToolUse blocks hand-editing the
 ledger/reports/helpers and blocks `compile --final` before that user stop. Use
 `--no-arm` for standby hooks that arm on `use this skill`. The user can always
 run the installer with `--disarm` or `--uninstall` from their own terminal.
@@ -115,4 +115,5 @@ python3 tests/test_research.py
 `tests/openhands_compat.py` is a faithful subset of the SDK contract, not the SDK
 itself. A live Cloud smoke test remains the final deployment check: start a new
 conversation, confirm `infinite` loads, verify one for/against checkpoint, say
-`stop`, and confirm both final reports are produced before the run finishes.
+`stop`, and confirm all three final reports (and their Google Docs) are produced
+before the run finishes.

@@ -136,11 +136,13 @@ install_skill_files() {
         references/book-of-mormon-research.md
         references/evidence-schema.md
         references/openhands-cloud.md
+        references/google-docs.md
         commands/infinite.md
         assets/project.gitignore.fragment
         scripts/infinite_guard.py
         scripts/infinite_state.py
         scripts/infinite_research.py
+        scripts/google_docs.py
         scripts/stop_hook.sh
         scripts/pretool_hook.sh
         scripts/userprompt_hook.sh
@@ -220,9 +222,11 @@ fetch_or_copy scripts/userprompt_hook.sh "$HOOK_DIR/infinite-userprompt.sh"
 fetch_or_copy scripts/infinite_state.py "$HOOK_DIR/infinite_state.py"
 if [ "$RESEARCH" -eq 1 ]; then
     fetch_or_copy scripts/infinite_research.py "$HOOK_DIR/infinite_research.py"
-    chmod +x "$HOOK_DIR/infinite_research.py"
+    fetch_or_copy scripts/google_docs.py "$HOOK_DIR/google_docs.py"
+    chmod +x "$HOOK_DIR/infinite_research.py" "$HOOK_DIR/google_docs.py"
     # The research validator is built into the Stop hook for this profile. It is
     # not a removable shell gate, so --no-gates still enforces the fixed task.
+    # The Google Docs mirror is part of final validation (three documents).
 fi
 chmod +x "$GUARD" "$HOOK_DIR"/infinite-*.sh "$HOOK_DIR/infinite_state.py" "$HOOK_DIR/infinite_guard.py"
 echo "installed guard:  $GUARD"
