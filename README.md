@@ -97,6 +97,10 @@ python3 infinite/scripts/google_docs.py --dir . setup   # creates the three Docs
 
 Headless alternative: `gws auth export --unmasked > credentials.json` on a
 browser machine, then `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/credentials.json`.
+On OpenHands Cloud, store that exported JSON as a Settings → Secrets entry named
+`GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON`; the helper materializes it into a
+private file for `gws` automatically (see
+[`infinite/references/google-docs.md`](infinite/references/google-docs.md)).
 Full walkthrough (including the manual Google Cloud Console links):
 [`infinite/references/google-docs.md`](infinite/references/google-docs.md).
 `compile` auto-syncs whenever `gws` is authenticated, and **final validation

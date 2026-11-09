@@ -174,6 +174,46 @@ def run_gws(args: list[str], retries: int = 3) -> dict:
     raise GDocsError(f"gws {label} failed after retries — {last_error}")
 
 
+CREDENTIALS_JSON_ENVS = ("GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON", "GWS_CREDENTIALS_JSON")
+MATERIALIZED_CREDS_REL = ".infinite/gws-credentials.json"
+
+
+def prepare_credentials(project: Path) -> None:
+    """Materialize an inline credentials secret into a private file for gws.
+
+    Hosted sandboxes (e.g. OpenHands Cloud) deliver user secrets as environment
+    variables, but gws takes credentials through GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE.
+    When one of CREDENTIALS_JSON_ENVS holds a full credentials JSON (the output of
+    `gws auth export --unmasked`, or a service-account key), write it to
+    `.infinite/gws-credentials.json` (mode 0600, guard-protected) and point the
+    env var at it — so no secret ever has to pass through the agent's shell.
+    """
+    if os.environ.get("GOOGLE_WORKSPACE_CLI_TOKEN"):
+        return
+    existing = os.environ.get("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE")
+    if existing and Path(existing).expanduser().is_file():
+        return
+    for name in CREDENTIALS_JSON_ENVS:
+        raw = (os.environ.get(name) or "").strip()
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise GDocsError(f"{name} is set but is not valid JSON ({exc}); it must hold the "
+                             f"contents of 'gws auth export --unmasked' (or a service-account key)")
+        if not isinstance(parsed, dict) or not parsed:
+            raise GDocsError(f"{name} must hold a credentials JSON object")
+        path = Path(project) / MATERIALIZED_CREDS_REL
+        path.parent.mkdir(parents=True, exist_ok=True)
+        current = path.read_text(encoding="utf-8") if path.is_file() else None
+        if current != raw + "\n":
+            path.write_text(raw + "\n", encoding="utf-8")
+            os.chmod(path, 0o600)
+        os.environ["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = str(path)
+        return
+
+
 def auth_probe() -> tuple[bool, str]:
     """Cheap, local check that gws exists and holds credentials for the user."""
     if os.environ.get("GOOGLE_WORKSPACE_CLI_TOKEN"):
@@ -478,6 +518,7 @@ def share_documents(receipt: dict, email: str) -> None:
 
 def sync_all(project: Path, mode: str) -> dict:
     """Sync the three compiled reports to Google Docs and update the receipt."""
+    prepare_credentials(project)
     ok, detail = auth_probe()
     if not ok:
         raise GDocsError(detail)
@@ -505,10 +546,11 @@ def maybe_sync(project: Path, mode: str = "interim") -> tuple[str, str]:
     a current final-mode receipt.
     """
     project = Path(project)
-    ok, detail = auth_probe()
-    if not ok:
-        return "skipped", detail
     try:
+        prepare_credentials(project)
+        ok, detail = auth_probe()
+        if not ok:
+            return "skipped", detail
         receipt = sync_all(project, mode)
     except GDocsError as exc:
         return "failed", str(exc)
@@ -523,6 +565,11 @@ def maybe_sync(project: Path, mode: str = "interim") -> tuple[str, str]:
 # --------------------------------------------------------------------------- #
 def cmd_setup(args) -> int:
     project = project_dir(args.dir)
+    try:
+        prepare_credentials(project)
+    except GDocsError as exc:
+        print(f"google docs setup blocked: {exc}", file=sys.stderr)
+        return 1
     ok, detail = auth_probe()
     if not ok:
         print(f"google docs setup blocked: {detail}", file=sys.stderr)
@@ -581,6 +628,10 @@ def cmd_status(args) -> int:
 
 def cmd_doctor(args) -> int:
     project = project_dir(args.dir)
+    try:
+        prepare_credentials(project)
+    except GDocsError as exc:
+        print(f"credential secret problem: {exc}")
     binary = gws_bin()
     print(f"gws binary  : {binary or 'NOT FOUND — ' + INSTALL_HINT}")
     if binary:

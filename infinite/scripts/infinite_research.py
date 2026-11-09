@@ -83,8 +83,9 @@ GDOCS_SETUP_HINT = (
     "Google Docs deliverables are required by the fixed prompt. They are published "
     "through the Google Workspace CLI (https://github.com/googleworkspace/cli): "
     "install it once (npm install -g @googleworkspace/cli), authenticate as the "
-    "user (gws auth setup / gws auth login, or exported credentials via "
-    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE for headless runs), then run "
+    "user (gws auth setup / gws auth login; headless: exported credentials via "
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE, or the exported JSON stored as a "
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON secret on hosted sandboxes), then run "
     "scripts/google_docs.py setup and sync (see references/google-docs.md)."
 )
 STOP_MARKER = Path(".openhands/guard/STOP_REQUESTED")

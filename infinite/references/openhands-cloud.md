@@ -48,6 +48,34 @@ The skill does not grant network access. If the Cloud environment restricts
 hosts, lacks a browser, or hits a paywall, record the limitation and use accessible
 primary texts/other source classes. Never pretend a blocked source was checked.
 
+## Google Docs deliverables in Cloud (gws)
+
+The three Google Docs are published through the Google Workspace CLI (`gws`,
+https://github.com/googleworkspace/cli). Cloud sandboxes have no browser and no
+`gws` by default, so set this up from your side before starting the
+conversation:
+
+1. Locally: `npm install -g @googleworkspace/cli && gws auth setup && gws auth
+   login`, then `gws auth export --unmasked > gws-credentials.json`.
+2. OpenHands Cloud → **Settings → Secrets**: add a secret named
+   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` whose value is the entire exported
+   JSON. Secrets are exported as environment variables in the agent runtime and
+   never shown in chat. Secrets reach conversations **started after** the save.
+3. In the sandbox, `gws` must be installed once (the installer prints this hint
+   when it is missing): `npm install -g @googleworkspace/cli` (Node 18+), or a
+   release binary from https://github.com/googleworkspace/cli/releases. `gws`
+   needs outbound access to `googleapis.com` (Discovery documents, API calls).
+4. That's it — `scripts/google_docs.py` materializes the secret into
+   `.infinite/gws-credentials.json` (mode 0600, guard-protected) and points
+   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` at it for its `gws` subprocesses.
+   `gws auth export`/`logout`/`reset` and writes to `~/.config/gws` are denied
+   for the agent; credentials stay user-owned.
+
+Until `gws` is installed and authenticated, interim compiles still produce the
+three local reports and the Stop gate warns with these instructions; final
+validation stays red until the Google Docs are synced (details:
+`google-docs.md`).
+
 ## Deterministic enforcement in Cloud
 
 Install from a terminal/setup environment **before starting the conversation**:

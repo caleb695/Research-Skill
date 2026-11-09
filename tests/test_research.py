@@ -396,6 +396,8 @@ class ResearchTests(unittest.TestCase):
             ("file_editor", {"path": ".infinite/gdocs.json", "command": "create", "file_text": "{}"}),
             ("file_editor", {"path": ".infinite/gdocs-oauth.json", "command": "create", "file_text": "{}"}),
             ("terminal", {"command": "gws auth export --unmasked > creds.json"}),
+            ("terminal", {"command": "echo '{}' > .infinite/gws-credentials.json"}),
+            ("file_editor", {"path": ".infinite/gws-credentials.json", "command": "str_replace", "old_str": "a", "new_str": "b"}),
             ("terminal", {"command": "gws auth logout"}),
             ("terminal", {"command": "rm -rf ~/.config/gws"}),
             ("file_editor", {"path": "~/.config/gws/credentials.json", "command": "str_replace", "old_str": "a", "new_str": "b"}),

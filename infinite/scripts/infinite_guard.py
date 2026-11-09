@@ -574,6 +574,7 @@ RESEARCH_WRITE_PATHS = [
     r"(^|[^A-Za-z0-9_])\.infinite/ledger\.jsonl\b",
     r"(^|[^A-Za-z0-9_])\.infinite/state\.json\b",
     r"(^|[^A-Za-z0-9_])\.infinite/gdocs(-oauth|-sa)?\.json\b",
+    r"(^|[^A-Za-z0-9_])\.infinite/gws-credentials\.json\b",
     r"(^|[^A-Za-z0-9_])research/book-of-mormon-(for|against|comparison)\.md\b",
     r"\.config/gws\b",
 ]

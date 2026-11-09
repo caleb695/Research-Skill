@@ -67,6 +67,44 @@ Also supported by `gws`: a service-account key via the same
 Credentials from `gws auth login` are encrypted at rest (AES-256-GCM, key in
 the OS keyring; `GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file` for headless).
 
+### OpenHands Cloud (hosted sandbox, no browser)
+
+Cloud sandboxes have no browser and don't come with `gws`, but OpenHands Cloud
+exports **Settings → Secrets** entries as environment variables in the agent
+runtime. The helper understands one extra variable so the secret never has to
+pass through the agent's shell or the chat:
+
+1. On your local machine (browser available): install `gws`, run
+   `gws auth setup` + `gws auth login`, then export the credentials:
+   ```bash
+   gws auth export --unmasked > gws-credentials.json
+   ```
+2. In OpenHands Cloud: **Settings → Secrets → Add a new secret** with
+   - Name: `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` (or `GWS_CREDENTIALS_JSON`)
+   - Value: the **entire contents** of `gws-credentials.json`
+   Secrets are masked in the UI and never appear in the conversation. Start a
+   **new conversation** after saving (secrets reach conversations started
+   afterwards).
+3. `gws` itself must exist in the sandbox. The agent (or a first message from
+   you) can install it once per sandbox — the installer prints this hint when
+   `gws` is missing:
+   ```bash
+   npm install -g @googleworkspace/cli     # if the runtime has Node 18+
+   # or download a binary from https://github.com/googleworkspace/cli/releases
+   ```
+4. Nothing else. When `scripts/google_docs.py` runs (setup/sync/doctor, or the
+   automatic post-compile mirror) it detects the secret env var, writes it to
+   `.infinite/gws-credentials.json` (mode 0600, guard-protected against agent
+   tampering), and points `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` at it for the
+   `gws` subprocesses.
+
+Notes: `GOOGLE_WORKSPACE_CLI_TOKEN` also works as a secret but holds a raw
+access token that expires (~1 h), so prefer the exported refresh-token JSON.
+`gws` fetches Discovery documents from `googleapis.com` at runtime (cached
+24 h) — Cloud sandboxes have outbound internet, so this works; in a locked-down
+sandbox the user can run the sync from their own terminal against the same
+workspace instead.
+
 ### 3. Create the three documents
 
 ```bash
@@ -143,8 +181,9 @@ user stop.
 - Authentication is entirely `gws`'s job: encrypted credential store or
   environment-provided credentials owned by the user. No secrets live in this
   repository, the ledger, the reports, or the receipt.
-- The agent is blocked from `gws auth export`/`logout` and from writing
-  `~/.config/gws` or `.infinite/gdocs*.json`.
+- The agent is blocked from `gws auth export`/`logout`/`reset` and from writing
+  `~/.config/gws`, `.infinite/gdocs*.json`, or the materialized Cloud secret
+  file `.infinite/gws-credentials.json` (mode 0600, written only by the helper).
 - The documents contain research output only; the receipt contains IDs/URLs and
   sync metadata, no secrets.
 - `gws` is not an officially supported Google product; it is the user-chosen

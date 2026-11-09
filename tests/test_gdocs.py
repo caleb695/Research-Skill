@@ -242,6 +242,7 @@ class FakeGwsTestCase(unittest.TestCase):
         self._saved_env = {}
         for key in ("GWS_BIN", "FAKE_GWS_STATE", "FAKE_GWS_UNAUTH", "FAKE_GWS_FAIL_AUTH",
                     "GOOGLE_WORKSPACE_CLI_TOKEN", "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE",
+                    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON", "GWS_CREDENTIALS_JSON",
                     "INFINITE_GDOCS"):
             self._saved_env[key] = os.environ.pop(key, None)
         os.environ["GWS_BIN"] = str(self.fake)
@@ -359,6 +360,31 @@ class TransportTests(FakeGwsTestCase):
             capture_output=True, text=True, env=dict(os.environ))
         self.assertEqual(proc.returncode, 1)
         self.assertIn("NOT AUTHENTICATED", proc.stdout)
+
+    def test_credentials_json_secret_is_materialized_privately(self):
+        """OpenHands Cloud delivers secrets as env vars; gws needs a file."""
+        secret = json.dumps({"type": "authorized_user", "client_id": "cid.apps.googleusercontent.com",
+                             "client_secret": "sec", "refresh_token": "rt"})
+        os.environ["GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON"] = secret
+        self.init_project()
+        status, message = gdocs.maybe_sync(self.project, "interim")
+        self.assertEqual(status, "synced", message)
+        path = self.project / ".infinite/gws-credentials.json"
+        self.assertTrue(path.is_file())
+        self.assertEqual(path.read_text(encoding="utf-8").strip(), secret)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(os.environ.get("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"), str(path))
+        ok, detail = gdocs.auth_probe()
+        self.assertTrue(ok)
+        self.assertEqual(detail, "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE")
+
+    def test_invalid_credentials_json_secret_fails_cleanly(self):
+        self.init_project()
+        os.environ["GWS_CREDENTIALS_JSON"] = "this is not json"
+        status, message = gdocs.maybe_sync(self.project, "interim")
+        self.assertEqual(status, "failed")
+        self.assertIn("GWS_CREDENTIALS_JSON", message)
+        self.assertIn("not valid JSON", message)
 
     def test_compile_auto_syncs_through_gws(self):
         """infinite_research.py compile must mirror via maybe_sync when gws works."""
