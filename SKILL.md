@@ -9,7 +9,7 @@ description: >-
   counters, ranked scores with reasons, extensive investigation), alternating
   for/against rounds, deduplication, cross-side evaluation, and three ranked
   final reports on stop — for, against, and head-to-head comparison — mirrored
-  to Google Docs with the user's own Google API. It does not accept a
+  to Google Docs through the Google Workspace CLI (gws). It does not accept a
   replacement task.
 triggers:
 - use this skill
@@ -85,7 +85,7 @@ override the user.
 | [`infinite/references/book-of-mormon-research.md`](infinite/references/book-of-mormon-research.md) | Verification, context, scoring, categories, deepening |
 | [`infinite/references/evidence-schema.md`](infinite/references/evidence-schema.md) | Ledger records and helper commands |
 | [`infinite/references/loop-protocol.md`](infinite/references/loop-protocol.md) | Durable state, resume, stop/finalization |
-| [`infinite/references/google-docs.md`](infinite/references/google-docs.md) | Google Docs deliverables, API setup links, sync |
+| [`infinite/references/google-docs.md`](infinite/references/google-docs.md) | Google Docs deliverables, gws CLI setup, sync |
 | [`infinite/references/openhands-cloud.md`](infinite/references/openhands-cloud.md) | Cloud loading, portable hooks, limits |
 | [`infinite/references/openhands-enforcement.md`](infinite/references/openhands-enforcement.md) | Deterministic user-owned enforcement |
 

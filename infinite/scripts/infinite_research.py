@@ -80,11 +80,11 @@ REPORTS = {"for": Path("research/book-of-mormon-for.md"),
            "comparison": Path("research/book-of-mormon-comparison.md")}
 GDOCS_RECEIPT = Path(".infinite/gdocs.json")
 GDOCS_SETUP_HINT = (
-    "Google Docs deliverables are required by the fixed prompt. Set them up once "
-    "(user-owned credentials): enable the Google Docs + Drive APIs at "
-    "https://console.cloud.google.com/apis/library/docs.googleapis.com and "
-    "https://console.cloud.google.com/apis/library/drive.googleapis.com, create "
-    "credentials at https://console.cloud.google.com/apis/credentials, then run "
+    "Google Docs deliverables are required by the fixed prompt. They are published "
+    "through the Google Workspace CLI (https://github.com/googleworkspace/cli): "
+    "install it once (npm install -g @googleworkspace/cli), authenticate as the "
+    "user (gws auth setup / gws auth login, or exported credentials via "
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE for headless runs), then run "
     "scripts/google_docs.py setup and sync (see references/google-docs.md)."
 )
 STOP_MARKER = Path(".openhands/guard/STOP_REQUESTED")

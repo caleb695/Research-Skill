@@ -3,44 +3,46 @@
 
 The fixed prompt requires the deliverables to be Google Documents: one FOR, one
 AGAINST, and one head-to-head COMPARISON. This helper creates and syncs those
-three documents with the USER's own Google API credentials. It is the only
-writer of the sync receipt `.infinite/gdocs.json`, and `infinite_research.py
-validate --final` refuses to pass until that receipt shows all three documents
-synced at the current ledger digest in final mode.
+three documents through the Google Workspace CLI (`gws`,
+https://github.com/googleworkspace/cli), which the user installs and
+authenticates once:
 
-Credentials (user-owned; the agent is blocked from writing them):
-  1. OAuth refresh token (recommended, pure standard library):
-     .infinite/gdocs-oauth.json  or  INFINITE_GDOCS_OAUTH_FILE
-     {"client_id": "...", "client_secret": "...", "refresh_token": "..."}
-  2. Service account key JSON:
-     .infinite/gdocs-sa.json  or  INFINITE_GDOCS_SA_FILE  or
-     GOOGLE_APPLICATION_CREDENTIALS
-     (requires `pip install cryptography` for RS256 JWT signing)
+    npm install -g @googleworkspace/cli     # or brew install googleworkspace-cli
+    gws auth setup                          # creates the Cloud project + OAuth client (needs gcloud)
+    gws auth login                          # or: manual Console setup / exported credentials
+    # headless: gws auth export --unmasked > credentials.json
+    #           export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/credentials.json
 
-Setup walkthrough and the Google Cloud Console links: references/google-docs.md.
+`gws` owns all authentication (encrypted credential store, OS keyring, service
+accounts, raw tokens); this helper never sees or stores secrets. It shells out
+to `gws docs documents create|get|batchUpdate` (and `gws drive permissions
+create` for sharing) and parses the CLI's structured JSON output.
+
+It is the only writer of the sync receipt `.infinite/gdocs.json`, and
+`infinite_research.py validate --final` refuses to pass until that receipt shows
+all three documents synced at the current ledger digest in final mode — so the
+run cannot finish on local Markdown alone.
 
 Commands:
-  setup [--share EMAIL]   validate credentials, create the three docs, write receipt
+  setup [--share EMAIL]   check gws + auth, create the three docs, write receipt
   sync [--mode M]         push the compiled reports into the three docs (M=interim|final)
   status                  show receipt, document URLs, and staleness
-  token                   diagnose credential resolution (prints no secrets)
+  doctor                  diagnose gws installation and authentication
 
-Standard library only (service-account signing additionally needs `cryptography`).
+Standard library only; requires the `gws` binary on PATH (override: GWS_BIN).
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -56,19 +58,22 @@ REPORT_PATHS = {
     "comparison": Path("research/book-of-mormon-comparison.md"),
 }
 RECEIPT_REL = Path(".infinite/gdocs.json")
-OAUTH_FILE_REL = Path(".infinite/gdocs-oauth.json")
-SA_FILE_REL = Path(".infinite/gdocs-sa.json")
-SCOPES = "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
-DOCS_BASE = "https://docs.googleapis.com/v1/documents"
-DRIVE_BASE = "https://www.googleapis.com/drive/v3/files"
 
 MAX_INSERT_CHARS = 3500          # per insertText request
 MAX_REQUESTS_PER_BATCH = 400     # per batchUpdate call
-MAX_BATCH_BYTES = 300_000        # serialized payload safety margin
+MAX_BATCH_BYTES = 250_000        # serialized payload safety margin (argv limit)
 MAX_CELL_CHARS = 800             # table cell truncation guard
-HTTP_TIMEOUT = 60
-RETRY_STATUSES = {429, 500, 502, 503, 504}
+GWS_TIMEOUT = 180                # seconds per gws invocation (discovery fetch can be slow)
+RETRY_EXIT_CODES = {1, 4, 5}     # API / discovery / internal errors may be transient
+RETRY_HTTP_CODES = {429, 500, 502, 503, 504}
+
+INSTALL_HINT = (
+    "install the Google Workspace CLI: npm install -g @googleworkspace/cli "
+    "(or brew install googleworkspace-cli, or a binary from "
+    "https://github.com/googleworkspace/cli/releases), then authenticate with "
+    "'gws auth login' (or 'gws auth setup', or export credentials for headless "
+    "use). Full walkthrough: references/google-docs.md"
+)
 
 
 class GDocsError(RuntimeError):
@@ -105,130 +110,94 @@ def ledger_digest(project: Path) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# credentials and tokens
+# gws CLI transport
 # --------------------------------------------------------------------------- #
-def resolve_credentials(project: Path) -> tuple[str, dict] | None:
-    """Return (kind, config) for the first usable credential source, or None."""
-    oauth_env = os.environ.get("INFINITE_GDOCS_OAUTH_FILE")
-    for candidate in ([Path(oauth_env).expanduser()] if oauth_env else []) + [project / OAUTH_FILE_REL]:
-        if candidate.is_file():
-            config = read_json(candidate, {})
-            if config.get("client_id") and config.get("refresh_token"):
-                return "oauth-refresh", config
-    sa_env = os.environ.get("INFINITE_GDOCS_SA_FILE") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    for candidate in ([Path(sa_env).expanduser()] if sa_env else []) + [project / SA_FILE_REL]:
-        if candidate.is_file():
-            config = read_json(candidate, {})
-            if config.get("client_email") and config.get("private_key"):
-                return "service-account", config
-    return None
+def gws_bin() -> str | None:
+    override = os.environ.get("GWS_BIN")
+    if override:
+        candidate = shutil.which(override) or (override if Path(override).is_file() else None)
+        return candidate
+    return shutil.which("gws")
 
 
-def http_json(url: str, method: str = "GET", payload=None, token: str | None = None,
-              form: dict | None = None, retries: int = 5):
-    data = None
-    headers = {"Accept": "application/json"}
-    if form is not None:
-        data = urllib.parse.urlencode(form).encode("utf-8")
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
-    elif payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+def run_gws(args: list[str], retries: int = 3) -> dict:
+    """Run one gws command and return its parsed JSON output.
+
+    Retries transient failures (429/5xx API errors, discovery fetch errors,
+    timeouts) with backoff. Raises GDocsError with actionable text otherwise.
+    """
+    binary = gws_bin()
+    if binary is None:
+        raise GDocsError(f"gws CLI not found on PATH; {INSTALL_HINT}")
+    label = " ".join(args[:4])
     last_error = ""
     for attempt in range(retries):
-        request = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
-                body = response.read().decode("utf-8")
-                return json.loads(body) if body else {}
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")[:800]
-            last_error = f"HTTP {exc.code}: {body}"
-            if exc.code not in RETRY_STATUSES or attempt == retries - 1:
-                raise GDocsError(f"{method} {url} failed — {last_error}") from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            last_error = str(exc)
+            proc = subprocess.run([binary, *args], capture_output=True, text=True, timeout=GWS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            last_error = f"timeout after {GWS_TIMEOUT}s"
             if attempt == retries - 1:
-                raise GDocsError(f"{method} {url} failed — {last_error}") from exc
-        time.sleep(min(2 ** attempt, 16))
-    raise GDocsError(f"{method} {url} failed — {last_error}")
+                raise GDocsError(f"gws {label} failed — {last_error}") from None
+            time.sleep(min(2 ** attempt, 16))
+            continue
+        except OSError as exc:
+            raise GDocsError(f"gws {label} could not be executed: {exc}") from exc
+        stdout = (proc.stdout or "").strip()
+        if proc.returncode == 0:
+            if not stdout:
+                return {}
+            try:
+                parsed = json.loads(stdout)
+            except json.JSONDecodeError as exc:
+                raise GDocsError(f"gws {label} returned non-JSON output: {stdout[:300]}") from exc
+            return parsed if isinstance(parsed, dict) else {"result": parsed}
+        detail = (proc.stderr or stdout)[:800].strip()
+        http_code = None
+        try:
+            http_code = json.loads(stdout).get("error", {}).get("code")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        if proc.returncode == 2:
+            raise GDocsError(
+                f"gws authentication failed (exit 2): {detail}. Run 'gws auth login' "
+                "(or point GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE at exported credentials). "
+                "See references/google-docs.md"
+            )
+        if proc.returncode == 3:
+            raise GDocsError(f"gws rejected the command (exit 3, validation): {detail}")
+        transient = proc.returncode in RETRY_EXIT_CODES and (http_code in RETRY_HTTP_CODES or http_code is None)
+        if transient and attempt < retries - 1:
+            last_error = f"exit {proc.returncode}" + (f" (HTTP {http_code})" if http_code else "") + f": {detail}"
+            time.sleep(min(2 ** attempt, 16))
+            continue
+        raise GDocsError(f"gws {label} failed (exit {proc.returncode}): {detail}")
+    raise GDocsError(f"gws {label} failed after retries — {last_error}")
 
 
-def oauth_refresh_token(config: dict) -> str:
-    form = {
-        "client_id": config["client_id"],
-        "refresh_token": config["refresh_token"],
-        "grant_type": "refresh_token",
-    }
-    if config.get("client_secret"):
-        form["client_secret"] = config["client_secret"]
+def auth_probe() -> tuple[bool, str]:
+    """Cheap, local check that gws exists and holds credentials for the user."""
+    if os.environ.get("GOOGLE_WORKSPACE_CLI_TOKEN"):
+        return True, "GOOGLE_WORKSPACE_CLI_TOKEN"
+    creds_file = os.environ.get("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE")
+    if creds_file and Path(creds_file).expanduser().is_file():
+        return True, "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"
+    binary = gws_bin()
+    if binary is None:
+        return False, f"gws CLI not found on PATH; {INSTALL_HINT}"
     try:
-        response = http_json(TOKEN_URL, method="POST", form=form)
+        status = run_gws(["auth", "status"], retries=1)
     except GDocsError as exc:
-        raise GDocsError(
-            f"OAuth refresh failed: {exc}. Check client_id/client_secret/refresh_token "
-            "and that the Google Docs + Drive APIs are enabled for the project "
-            "(https://console.cloud.google.com/apis/library/docs.googleapis.com)."
-        ) from exc
-    token = response.get("access_token")
-    if not token:
-        raise GDocsError("OAuth refresh response contained no access_token")
-    return token
-
-
-def service_account_token(config: dict) -> str:
-    try:
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import padding
-    except ImportError as exc:
-        raise GDocsError(
-            "service-account auth needs RS256 signing: run `pip install cryptography`, "
-            "or use the OAuth refresh-token credentials instead (references/google-docs.md)"
-        ) from exc
-
-    def b64(raw: bytes) -> str:
-        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-    issued = int(time.time())
-    header = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
-    claims = b64(json.dumps({
-        "iss": config["client_email"],
-        "scope": SCOPES,
-        "aud": config.get("token_uri", TOKEN_URL),
-        "iat": issued,
-        "exp": issued + 3600,
-    }).encode())
-    signing_input = f"{header}.{claims}".encode("ascii")
-    key = serialization.load_pem_private_key(config["private_key"].encode(), password=None)
-    signature = key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
-    assertion = signing_input.decode("ascii") + "." + b64(signature)
-    response = http_json(config.get("token_uri", TOKEN_URL), method="POST",
-                         form={"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                               "assertion": assertion})
-    token = response.get("access_token")
-    if not token:
-        raise GDocsError("service-account token response contained no access_token")
-    return token
-
-
-def get_token(project: Path) -> tuple[str, str]:
-    resolved = resolve_credentials(project)
-    if resolved is None:
-        raise GDocsError(
-            "no Google credentials found. Create them (user-owned) at "
-            "https://console.cloud.google.com/apis/credentials after enabling the Docs and Drive "
-            "APIs, then place .infinite/gdocs-oauth.json or .infinite/gdocs-sa.json — full "
-            "walkthrough in references/google-docs.md"
-        )
-    kind, config = resolved
-    token = oauth_refresh_token(config) if kind == "oauth-refresh" else service_account_token(config)
-    return kind, token
+        return False, str(exc)
+    if status.get("auth_method") not in (None, "none") or status.get("credential_source") not in (None, "none"):
+        source = status.get("credential_source") or status.get("auth_method")
+        return True, f"gws auth ({source})"
+    return False, ("gws is installed but not authenticated; run 'gws auth login' "
+                   "(or 'gws auth setup', or export credentials headlessly). "
+                   "See references/google-docs.md")
 
 
 # --------------------------------------------------------------------------- #
-# markdown -> Google Docs conversion
+# markdown -> Google Docs conversion (transport-independent)
 # --------------------------------------------------------------------------- #
 INLINE_RE = re.compile(r"(\*\*.+?\*\*|\[[^\]]+\]\([^)\s]+\)|`[^`]+`)")
 HEADING_STYLES = {1: "TITLE", 2: "HEADING_1", 3: "HEADING_2", 4: "HEADING_3", 5: "HEADING_3", 6: "HEADING_3"}
@@ -357,12 +326,37 @@ def find_table_at(document: dict, start_index: int) -> dict | None:
     return None
 
 
+class GwsDocs:
+    """Thin wrapper over the gws Docs surface."""
+
+    def __init__(self, document_id: str):
+        self.document_id = document_id
+
+    def get(self) -> dict:
+        return run_gws(["docs", "documents", "get",
+                        "--params", json.dumps({"documentId": self.document_id})])
+
+    def batch_update(self, requests: list[dict]) -> dict:
+        if not requests:
+            return {}
+        return run_gws(["docs", "documents", "batchUpdate",
+                        "--params", json.dumps({"documentId": self.document_id}),
+                        "--json", json.dumps({"requests": requests})])
+
+    @staticmethod
+    def create(title: str) -> str:
+        response = run_gws(["docs", "documents", "create", "--json", json.dumps({"title": title})])
+        document_id = response.get("documentId")
+        if not document_id:
+            raise GDocsError(f"docs.documents.create for '{title}' returned no documentId: {str(response)[:300]}")
+        return str(document_id)
+
+
 class Batcher:
     """Accumulates Docs requests and flushes them in size-bounded batchUpdates."""
 
-    def __init__(self, document_id: str, token: str):
-        self.document_id = document_id
-        self.token = token
+    def __init__(self, docs: GwsDocs):
+        self.docs = docs
         self.pending: list[dict] = []
 
     def add(self, requests: list[dict]) -> None:
@@ -378,15 +372,15 @@ class Batcher:
         if not self.pending:
             return
         batch, self.pending = self.pending, []
-        http_json(f"{DOCS_BASE}/{self.document_id}:batchUpdate", method="POST",
-                  payload={"requests": batch}, token=self.token)
+        self.docs.batch_update(batch)
 
 
-def sync_document(document_id: str, token: str, markdown: str, title: str) -> None:
+def sync_document(document_id: str, markdown: str, title: str) -> None:
     """Replace the document's content with the rendered markdown report."""
-    document = http_json(f"{DOCS_BASE}/{document_id}", token=token)
+    docs = GwsDocs(document_id)
+    document = docs.get()
     end = document_end_index(document)
-    batcher = Batcher(document_id, token)
+    batcher = Batcher(docs)
     if end > 2:
         batcher.add([{"deleteContentRange": {"range": {"startIndex": 1, "endIndex": end - 1}}}])
     batcher.flush()
@@ -406,25 +400,24 @@ def sync_document(document_id: str, token: str, markdown: str, title: str) -> No
             rows = block["rows"]
             if not rows or not rows[0]:
                 continue
-            http_json(f"{DOCS_BASE}/{document_id}:batchUpdate", method="POST", token=token,
-                      payload={"requests": [{"insertTable": {
-                          "location": {"index": cursor}, "rows": len(rows), "columns": len(rows[0])}}]})
-            document = http_json(f"{DOCS_BASE}/{document_id}", token=token)
+            docs.batch_update([{"insertTable": {
+                "location": {"index": cursor}, "rows": len(rows), "columns": len(rows[0])}}])
+            document = docs.get()
             table = find_table_at(document, cursor)
             if table is None:
                 raise GDocsError(f"could not locate inserted table at index {cursor}")
-            cells: list[tuple[int, str, bool]] = []
+            cells: list[tuple[int, bool]] = []
             for row_index, row in enumerate(table.get("table", {}).get("tableRows", [])):
                 for cell in row.get("tableCells", []):
                     content = cell.get("content") or [{}]
                     start = int(content[0].get("startIndex", cursor))
-                    cells.append((start, "", row_index == 0))
+                    cells.append((start, row_index == 0))
             flat = [c for row in rows for c in row]
             if len(flat) != len(cells):
                 flat = (flat + [""] * len(cells))[:len(cells)]
             cell_requests: list[dict] = []
             inserted = 0
-            for (start, _unused, header), text in reversed(list(zip(cells, flat))):
+            for (start, header), text in reversed(list(zip(cells, flat))):
                 text = text.replace("\n", " ").strip()
                 if not text:
                     continue
@@ -444,15 +437,11 @@ def sync_document(document_id: str, token: str, markdown: str, title: str) -> No
             # Cells were processed in reverse document order, so every recorded
             # index stays valid while the batch applies sequentially.
             for chunk_start in range(0, len(cell_requests), MAX_REQUESTS_PER_BATCH):
-                chunk = cell_requests[chunk_start:chunk_start + MAX_REQUESTS_PER_BATCH]
-                http_json(f"{DOCS_BASE}/{document_id}:batchUpdate", method="POST",
-                          payload={"requests": chunk}, token=token)
+                docs.batch_update(cell_requests[chunk_start:chunk_start + MAX_REQUESTS_PER_BATCH])
             table_element_end = int(table.get("endIndex", cursor + 1))
             cursor = table_element_end + inserted
     batcher.flush()
-    http_json(f"{DOCS_BASE}/{document_id}:batchUpdate", method="POST", token=token,
-              payload={"requests": [{"updateDocumentProperties": {
-                  "properties": {"title": title}, "fields": "title"}}]})
+    docs.batch_update([{"updateDocumentProperties": {"properties": {"title": title}, "fields": "title"}}])
 
 
 # --------------------------------------------------------------------------- #
@@ -462,16 +451,13 @@ def receipt_path(project: Path) -> Path:
     return project / RECEIPT_REL
 
 
-def create_missing_documents(project: Path, token: str, receipt: dict) -> dict:
+def create_missing_documents(project: Path, receipt: dict) -> dict:
     documents = receipt.get("documents") if isinstance(receipt.get("documents"), dict) else {}
     for name in DOC_NAMES:
         entry = documents.get(name) if isinstance(documents.get(name), dict) else {}
         if entry.get("id"):
             continue
-        created = http_json(DOCS_BASE, method="POST", payload={"title": TITLES[name]}, token=token)
-        document_id = created.get("documentId")
-        if not document_id:
-            raise GDocsError(f"documents.create for '{name}' returned no documentId")
+        document_id = GwsDocs.create(TITLES[name])
         entry = {"id": document_id, "title": TITLES[name],
                  "url": f"https://docs.google.com/document/d/{document_id}/edit"}
         documents[name] = entry
@@ -480,28 +466,30 @@ def create_missing_documents(project: Path, token: str, receipt: dict) -> dict:
     return receipt
 
 
-def share_documents(receipt: dict, token: str, email: str) -> None:
+def share_documents(receipt: dict, email: str) -> None:
     for name in DOC_NAMES:
         entry = receipt.get("documents", {}).get(name, {})
         if not entry.get("id"):
             continue
-        http_json(f"{DRIVE_BASE}/{entry['id']}/permissions?sendNotificationEmail=false",
-                  method="POST", token=token,
-                  payload={"role": "writer", "type": "user", "emailAddress": email})
+        run_gws(["drive", "permissions", "create",
+                 "--params", json.dumps({"fileId": entry["id"], "sendNotificationEmail": False}),
+                 "--json", json.dumps({"role": "writer", "type": "user", "emailAddress": email})])
 
 
 def sync_all(project: Path, mode: str) -> dict:
     """Sync the three compiled reports to Google Docs and update the receipt."""
-    kind, token = get_token(project)
+    ok, detail = auth_probe()
+    if not ok:
+        raise GDocsError(detail)
     receipt = read_json(receipt_path(project), {})
-    receipt = create_missing_documents(project, token, receipt)
+    receipt = create_missing_documents(project, receipt)
     for name in DOC_NAMES:
         report = project / REPORT_PATHS[name]
         if not report.is_file():
             raise GDocsError(f"report {report} is missing; run infinite_research.py compile first")
-        sync_document(receipt["documents"][name]["id"], token,
+        sync_document(receipt["documents"][name]["id"],
                       report.read_text(encoding="utf-8"), TITLES[name])
-    receipt["auth"] = kind
+    receipt["auth"] = f"gws-cli:{detail}"
     receipt["last_sync"] = {"ts": now(), "mode": mode, "digest": ledger_digest(project),
                             "documents_synced": list(DOC_NAMES)}
     write_json(receipt_path(project), receipt)
@@ -512,16 +500,14 @@ def maybe_sync(project: Path, mode: str = "interim") -> tuple[str, str]:
     """Best-effort entry point used by infinite_research.py compile.
 
     Returns (status, message) with status in {"synced", "skipped", "failed"};
-    never raises, so a missing credential or network failure cannot break the
+    never raises, so a missing gws install or network failure cannot break the
     local compile. Final enforcement lives in validate --final, which requires
     a current final-mode receipt.
     """
     project = Path(project)
-    if resolve_credentials(project) is None:
-        return "skipped", ("no Google credentials found (.infinite/gdocs-oauth.json, "
-                           ".infinite/gdocs-sa.json, INFINITE_GDOCS_OAUTH_FILE, "
-                           "INFINITE_GDOCS_SA_FILE, or GOOGLE_APPLICATION_CREDENTIALS); "
-                           "see references/google-docs.md")
+    ok, detail = auth_probe()
+    if not ok:
+        return "skipped", detail
     try:
         receipt = sync_all(project, mode)
     except GDocsError as exc:
@@ -529,7 +515,7 @@ def maybe_sync(project: Path, mode: str = "interim") -> tuple[str, str]:
     except (OSError, ValueError) as exc:
         return "failed", f"unexpected error: {exc}"
     urls = ", ".join(receipt.get("documents", {}).get(name, {}).get("url", "?") for name in DOC_NAMES)
-    return "synced", f"all three Google Docs updated ({mode} mode): {urls}"
+    return "synced", f"all three Google Docs updated via gws ({mode} mode): {urls}"
 
 
 # --------------------------------------------------------------------------- #
@@ -537,36 +523,40 @@ def maybe_sync(project: Path, mode: str = "interim") -> tuple[str, str]:
 # --------------------------------------------------------------------------- #
 def cmd_setup(args) -> int:
     project = project_dir(args.dir)
-    kind, token = get_token(project)
-    receipt = create_missing_documents(project, token, read_json(receipt_path(project), {}))
+    ok, detail = auth_probe()
+    if not ok:
+        print(f"google docs setup blocked: {detail}", file=sys.stderr)
+        return 1
+    receipt = create_missing_documents(project, read_json(receipt_path(project), {}))
     if args.share:
-        share_documents(receipt, token, args.share)
+        share_documents(receipt, args.share)
         print(f"shared all three documents with {args.share} (writer)")
-    receipt["auth"] = kind
+    receipt["auth"] = f"gws-cli:{detail}"
     receipt["setup_at"] = now()
     write_json(receipt_path(project), receipt)
-    print(f"credentials: {kind}")
+    print(f"gws authentication: {detail}")
     for name in DOC_NAMES:
         entry = receipt["documents"][name]
         print(f"  {name:10s} {entry['url']}")
-    print("next: python3 google_docs.py --dir . sync   (runs automatically after each compile when credentials exist)")
+    print("next: python3 google_docs.py --dir . sync   (runs automatically after each compile when gws is authenticated)")
     return 0
 
 
 def cmd_sync(args) -> int:
     project = project_dir(args.dir)
-    mode = args.mode
-    if mode == "final" and not (project / ".openhands/guard/STOP_REQUESTED").exists():
+    if args.mode == "final" and not (project / ".openhands/guard/STOP_REQUESTED").exists():
         # Mirrors the guard rule: a final sync only follows a real user stop.
-        print("note: no user STOP_REQUESTED marker found; recording final mode anyway is blocked by the "
-              "guard when hooks are installed. Use --mode final only after the user says stop.", file=sys.stderr)
-    status, message = maybe_sync(project, mode)
+        print("note: no user STOP_REQUESTED marker found; the guard blocks a premature final "
+              "sync when hooks are installed. Use --mode final only after the user says stop.",
+              file=sys.stderr)
+    status, message = maybe_sync(project, args.mode)
+    if status == "skipped":
+        print(f"google docs sync SKIPPED: {message}", file=sys.stderr)
+        return 1
     if status == "failed":
         print(f"google docs sync FAILED: {message}", file=sys.stderr)
         return 1
     print(f"google docs: {message}")
-    if status == "skipped":
-        return 1
     return 0
 
 
@@ -575,7 +565,7 @@ def cmd_status(args) -> int:
     receipt = read_json(receipt_path(project), {})
     if not receipt:
         print("no Google Docs receipt yet; run: python3 google_docs.py --dir . setup")
-        print("(credentials walkthrough: references/google-docs.md)")
+        print("(gws walkthrough: references/google-docs.md)")
         return 0
     digest = ledger_digest(project)
     synced = receipt.get("last_sync", {})
@@ -589,27 +579,33 @@ def cmd_status(args) -> int:
     return 0
 
 
-def cmd_token(args) -> int:
+def cmd_doctor(args) -> int:
     project = project_dir(args.dir)
-    resolved = resolve_credentials(project)
-    if resolved is None:
-        print("no credentials resolved; see references/google-docs.md")
-        return 1
-    kind, _config = resolved
-    try:
-        get_token(project)
-    except GDocsError as exc:
-        print(f"{kind}: token request failed — {exc}", file=sys.stderr)
-        return 1
-    print(f"{kind}: token OK (scopes: {SCOPES})")
-    return 0
+    binary = gws_bin()
+    print(f"gws binary  : {binary or 'NOT FOUND — ' + INSTALL_HINT}")
+    if binary:
+        try:
+            proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=30)
+            print(f"gws version : {(proc.stdout or proc.stderr).strip()[:120] or 'unknown'}")
+        except (OSError, subprocess.TimeoutExpired):
+            print("gws version : (could not run --version)")
+    ok, detail = auth_probe()
+    print(f"auth probe  : {'OK' if ok else 'NOT AUTHENTICATED'} — {detail}")
+    receipt = read_json(receipt_path(project), {})
+    if receipt:
+        synced = receipt.get("last_sync", {})
+        current = synced.get("digest") == ledger_digest(project)
+        print(f"receipt     : {len(receipt.get('documents', {}))} documents; last sync {synced.get('ts', 'never')} ({synced.get('mode', '?')}); {'current' if current else 'STALE'}")
+    else:
+        print("receipt     : none (run setup)")
+    return 0 if ok else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dir", help="project workspace (default: current directory)")
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("setup", help="validate credentials and create the three documents")
+    p = sub.add_parser("setup", help="check gws + auth, create the three documents")
     p.add_argument("--share", metavar="EMAIL", help="share the documents with this Google account (writer)")
     p.set_defaults(func=cmd_setup)
     p = sub.add_parser("sync", help="push the compiled reports into the three documents")
@@ -617,8 +613,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_sync)
     p = sub.add_parser("status", help="show receipt, URLs, and staleness")
     p.set_defaults(func=cmd_status)
-    p = sub.add_parser("token", help="diagnose credential resolution")
-    p.set_defaults(func=cmd_token)
+    p = sub.add_parser("doctor", help="diagnose the gws installation and authentication")
+    p.set_defaults(func=cmd_doctor)
     return parser
 
 

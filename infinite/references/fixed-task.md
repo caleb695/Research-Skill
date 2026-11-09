@@ -68,9 +68,10 @@ Note that people can lie and people can be wrong so don’t take everything at f
   component ratings plus the single computed Evidence Impact Score.
 - The final deliverables are **three** reports — for, against, and a head-to-head
   comparison where every contradicting point is pointed against its opposite —
-  and all three are mirrored into **Google Docs** created with the user's own
-  Google API credentials (see `references/google-docs.md`). Final validation
-  fails until all three Google Docs are synced at the final ledger digest.
+  and all three are mirrored into **Google Docs** published through the Google
+  Workspace CLI (`gws`, https://github.com/googleworkspace/cli) authenticated as
+  the user (see `references/google-docs.md`). Final validation fails until all
+  three Google Docs are synced at the final ledger digest.
 - The rest of this skill package defines how to execute the fixed prompt:
   alternating for/against rounds, authentication, context/POV, multi-source
   corroboration, counters, scoring, deduplication, cross-side evaluation, a

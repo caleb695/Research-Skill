@@ -79,23 +79,29 @@ comparison report is "one document with everything": direct contradictions where
 opposing for/against points are shown head-to-head with both counter-analyses
 and scores, claim and category face-offs, and the full combined register.
 
-### Google Docs (the user's own Google API)
+### Google Docs (via the Google Workspace CLI)
 
 The deliverables are Google Documents, not just local Markdown.
 `infinite/scripts/google_docs.py` creates and syncs three Google Docs (FOR,
-AGAINST, COMPARISON) with credentials you create once in the Google Cloud
-Console:
+AGAINST, COMPARISON) through the **Google Workspace CLI**
+([github.com/googleworkspace/cli](https://github.com/googleworkspace/cli)),
+which you install and authenticate once — `gws` owns all credentials, the skill
+never handles tokens or secrets:
 
-- Create a project: <https://console.cloud.google.com/projectcreate>
-- Enable the Google Docs API: <https://console.cloud.google.com/apis/library/docs.googleapis.com>
-- Enable the Google Drive API: <https://console.cloud.google.com/apis/library/drive.googleapis.com>
-- Create credentials: <https://console.cloud.google.com/apis/credentials>
+```bash
+npm install -g @googleworkspace/cli   # or brew install googleworkspace-cli
+gws auth setup                        # creates the Cloud project + OAuth client (needs gcloud)
+gws auth login                        # or manual Console setup / exported credentials for headless
+python3 infinite/scripts/google_docs.py --dir . setup   # creates the three Docs
+```
 
-Full walkthrough (OAuth refresh token or service account):
+Headless alternative: `gws auth export --unmasked > credentials.json` on a
+browser machine, then `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/credentials.json`.
+Full walkthrough (including the manual Google Cloud Console links):
 [`infinite/references/google-docs.md`](infinite/references/google-docs.md).
-`compile` auto-syncs when credentials exist, and **final validation fails until
-all three Google Docs are synced at the final ledger digest** — the run cannot
-finish on local files alone.
+`compile` auto-syncs whenever `gws` is authenticated, and **final validation
+fails until all three Google Docs are synced at the final ledger digest** — the
+run cannot finish on local files alone.
 
 Say **`stop`** to end research. The skill then stops searching, compiles all
 three final reports from recorded findings, and syncs the final Google Docs.
@@ -154,7 +160,7 @@ python3 infinite/scripts/infinite_research.py --dir . init
 python3 infinite/scripts/infinite_research.py --dir . status
 python3 infinite/scripts/infinite_research.py --dir . validate
 python3 infinite/scripts/infinite_state.py --dir . status
-python3 infinite/scripts/google_docs.py --dir . setup   # once, after creating Google API credentials
+python3 infinite/scripts/google_docs.py --dir . setup   # once, after installing + authenticating the gws CLI
 python3 infinite/scripts/google_docs.py --dir . status
 ```
 

@@ -50,7 +50,7 @@ python3 infinite/scripts/infinite_state.py --dir . log \
   --change "Added F001 with provenance and context checks" \
   --verification "Original located; wording and locator checked; validator passed" \
   --next "Investigate the strongest against-side objection to X"
-python3 "$H" --dir . compile     # also mirrors to Google Docs when credentials exist
+python3 "$H" --dir . compile     # also mirrors to Google Docs via gws when authenticated
 python3 "$H" --dir . validate
 ```
 

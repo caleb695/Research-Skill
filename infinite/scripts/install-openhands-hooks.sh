@@ -309,6 +309,14 @@ done
 
 if [ "$RESEARCH" -eq 1 ]; then
     python3 "$HOOK_DIR/infinite_research.py" --dir "$TARGET_DIR" init
+    if ! command -v "${GWS_BIN:-gws}" >/dev/null 2>&1; then
+        echo
+        echo "note: the 'gws' Google Workspace CLI was not found on PATH."
+        echo "      The three Google Docs deliverables (for/against/comparison) are published through it:"
+        echo "        npm install -g @googleworkspace/cli   # or brew install googleworkspace-cli"
+        echo "        gws auth setup && gws auth login      # one-time, user-owned authentication"
+        echo "      Details: infinite/references/google-docs.md"
+    fi
 fi
 
 if [ "$ARM" -eq 1 ]; then

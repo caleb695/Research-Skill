@@ -27,11 +27,12 @@ iteration cap does not erase findings. This skill runs only the prompt in
 ```
 
 `.infinite/` is scratch state; keep it out of Git unless the user explicitly wants
-the raw ledger preserved. It also holds the user-owned Google Docs credentials
-(`gdocs-oauth.json` / `gdocs-sa.json`) and the sync receipt (`gdocs.json`) —
-never commit credentials. The three Markdown reports are deliverables, published
-as Google Docs by `scripts/google_docs.py` (see `google-docs.md`). Never commit
-`.openhands/guard/`. Hook wiring may be committed when the user wants it to travel
+the raw ledger preserved. It also holds the Google Docs sync receipt
+(`gdocs.json`); Google authentication itself lives in the `gws` CLI's own
+user-owned store (`~/.config/gws` or `GOOGLE_WORKSPACE_CLI_*` env vars) — never
+commit credentials. The three Markdown reports are deliverables, published as
+Google Docs by `scripts/google_docs.py` via `gws` (see `google-docs.md`). Never
+commit `.openhands/guard/`. Hook wiring may be committed when the user wants it to travel
 with the repo; use the installer's portable relative commands.
 
 ## Initialize and log

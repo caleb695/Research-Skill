@@ -327,7 +327,8 @@ class ResearchTests(unittest.TestCase):
         self.run_py(RESEARCH, "compile", "--final")
         proc = self.run_py(RESEARCH, "validate", "--final", ok=False)
         self.assertIn("Google Docs deliverables are missing", proc.stderr)
-        self.assertIn("console.cloud.google.com", proc.stderr)
+        self.assertIn("googleworkspace/cli", proc.stderr)
+        self.assertIn("gws auth login", proc.stderr)
         self.write_receipt("interim")
         proc = self.run_py(RESEARCH, "validate", "--final", ok=False)
         self.assertIn("interim mode", proc.stderr)
@@ -394,6 +395,10 @@ class ResearchTests(unittest.TestCase):
             ("terminal", {"command": "echo '{\"documents\":{}}' > .infinite/gdocs.json"}),
             ("file_editor", {"path": ".infinite/gdocs.json", "command": "create", "file_text": "{}"}),
             ("file_editor", {"path": ".infinite/gdocs-oauth.json", "command": "create", "file_text": "{}"}),
+            ("terminal", {"command": "gws auth export --unmasked > creds.json"}),
+            ("terminal", {"command": "gws auth logout"}),
+            ("terminal", {"command": "rm -rf ~/.config/gws"}),
+            ("file_editor", {"path": "~/.config/gws/credentials.json", "command": "str_replace", "old_str": "a", "new_str": "b"}),
         ]
         for tool_name, tool_input in attacks:
             result = self.hook(self.project, "pretool", tool_name=tool_name, tool_input=tool_input)
@@ -405,6 +410,9 @@ class ResearchTests(unittest.TestCase):
             ("terminal", {"command": "python3 .agents/skills/infinite/scripts/infinite_state.py --dir . status"}),
             ("terminal", {"command": "python3 .agents/skills/infinite/scripts/google_docs.py --dir . status"}),
             ("terminal", {"command": "python3 .agents/skills/infinite/scripts/google_docs.py --dir . sync"}),
+            ("terminal", {"command": "python3 .agents/skills/infinite/scripts/google_docs.py --dir . doctor"}),
+            ("terminal", {"command": "gws auth status"}),
+            ("terminal", {"command": "gws docs documents get --params '{\"documentId\": \"abc\"}'"}),
         ]
         for tool_name, tool_input in allowed:
             result = self.hook(self.project, "pretool", tool_name=tool_name, tool_input=tool_input)

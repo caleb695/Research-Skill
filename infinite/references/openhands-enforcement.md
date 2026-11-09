@@ -110,9 +110,10 @@ Denied outright:
 - editing `.openhands/hooks.json` or the guard through a file tool;
 - in the research profile, hand-editing `.infinite/ledger.jsonl`,
   `.infinite/state.json`, the three generated reports (for/against/comparison),
-  the Google Docs receipt `.infinite/gdocs.json`, the user's Google credentials
-  files, or the validating helpers (`infinite_research.py`, `infinite_state.py`,
-  `google_docs.py`);
+  the Google Docs receipt `.infinite/gdocs.json`, the `gws` CLI credential
+  store (`~/.config/gws`), or the validating helpers (`infinite_research.py`,
+  `infinite_state.py`, `google_docs.py`); running `gws auth export`/`logout` is
+  likewise denied (credentials are user-owned);
 - in the research profile, `compile --final` or `google_docs.py sync --mode
   final` before a real user stop, or agent-side `arm`/`disarm`/`resume` after a
   stop until the user continues.

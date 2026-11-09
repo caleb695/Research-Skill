@@ -575,6 +575,7 @@ RESEARCH_WRITE_PATHS = [
     r"(^|[^A-Za-z0-9_])\.infinite/state\.json\b",
     r"(^|[^A-Za-z0-9_])\.infinite/gdocs(-oauth|-sa)?\.json\b",
     r"(^|[^A-Za-z0-9_])research/book-of-mormon-(for|against|comparison)\.md\b",
+    r"\.config/gws\b",
 ]
 RESEARCH_CODE_PATHS = [
     r"(^|[^A-Za-z0-9_])infinite_(research|state|guard)\.py\b",
@@ -616,6 +617,10 @@ def research_protected_reason(tool_name: str, tool_input: dict, project: Path, p
         command = strings.get("command", "")
         if not command:
             return None
+        if re.search(r"\bgws\s+auth\s+(export|logout|reset)\b", command):
+            return ("Blocked: the gws (Google Workspace CLI) credential store is user-owned. "
+                    "Exporting or clearing its credentials is not an agent action; ask the user "
+                    "to manage 'gws auth' themselves. Continue the fixed research task.")
         write_paths = any(re.search(p, command) for p in RESEARCH_WRITE_PATHS)
         code_paths = any(re.search(p, command) for p in RESEARCH_CODE_PATHS)
         helper = re.search(r"infinite_(research|state)\.py|google_docs\.py", command)
