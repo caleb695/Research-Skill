@@ -9,19 +9,70 @@ not only local Markdown:
 | AGAINST | `research/book-of-mormon-against.md` | Book of Mormon Evidence — AGAINST |
 | COMPARISON (both against each other) | `research/book-of-mormon-comparison.md` | Book of Mormon Evidence — FOR vs AGAINST (Comparison) |
 
-All Google access goes through the **Google Workspace CLI**
-([github.com/googleworkspace/cli](https://github.com/googleworkspace/cli)) —
-one command-line tool for Drive, Docs, and the rest of Workspace, built for
-humans and AI agents, with structured JSON output. `scripts/google_docs.py`
-shells out to `gws docs documents create|get|batchUpdate` (and `gws drive
-permissions create` for sharing); **`gws` owns all authentication** — the skill
-never sees, stores, or handles tokens or client secrets itself.
+`scripts/google_docs.py` has **two interchangeable transports** (Python
+standard library only):
+
+1. **Google Workspace CLI** ([github.com/googleworkspace/cli](https://github.com/googleworkspace/cli))
+   when installed — the helper shells out to `gws docs documents
+   create|get|batchUpdate` (and `gws drive permissions create` for sharing),
+   and **`gws` owns all authentication** (encrypted store, OS keyring,
+   service accounts).
+2. **Direct REST fallback** — when `gws` is not on PATH, the helper calls the
+   Google Docs + Drive REST APIs itself using user credentials
+   (`client_id`/`client_secret`/`refresh_token`). Nothing to install; ideal for
+   hosted sandboxes and **phone-only users** (see below).
+
+`GDOCS_TRANSPORT=auto|gws|rest` forces a transport (default `auto`: gws when
+installed, else REST). Either way the skill never displays or transmits
+secrets; credential files are mode 0600, gitignored, and guard-protected.
 
 **Final validation is coded to fail** until all three Google Docs are synced at
 the final ledger digest in `final` mode (`.infinite/gdocs.json` receipt) — so
 the run cannot finish on local files alone.
 
-## Setup (the user does this once)
+## Phone-only setup (no computer needed)
+
+If you have no computer — only a phone/tablet — skip the CLI entirely. Google's
+**device-code flow** lets the sandbox show a short code that you approve from
+your phone's browser, and the built-in REST transport does the rest.
+
+1. In your **phone browser**, open the Google Cloud Console
+   (sign in with your Google account; it's free, no credit card):
+   - Create a project: <https://console.cloud.google.com/projectcreate>
+   - Enable the Google Docs API:
+     <https://console.cloud.google.com/apis/library/docs.googleapis.com>
+   - Enable the Google Drive API:
+     <https://console.cloud.google.com/apis/library/drive.googleapis.com>
+   - OAuth consent screen:
+     <https://console.cloud.google.com/apis/credentials/consent> — App type
+     **External** (testing mode is fine) and **add your own Google account as a
+     Test user** (required, or the login is rejected).
+   - Credentials: <https://console.cloud.google.com/apis/credentials> →
+     **+ Create credentials → OAuth client ID → TVs and Limited Input devices**
+     (device flow only works with this client type). Note the **Client ID** and
+     **Client secret** shown on the page.
+2. In OpenHands Cloud → **Settings → Secrets**, add two secrets:
+   - `GOOGLE_WORKSPACE_CLI_CLIENT_ID` = the client ID
+   - `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET` = the client secret
+   Then **start a new conversation** (secrets only reach conversations started
+   after the save).
+3. In the conversation, the agent runs:
+   ```bash
+   python3 infinite/scripts/google_docs.py --dir . login
+   ```
+   It prints a URL (`https://www.google.com/device`) and a code like
+   `ABCD-EFGH`. Open that URL on your phone, enter the code, sign in, and
+   approve. The sandbox receives a refresh token and saves it to
+   `.infinite/gws-credentials.json` (mode 0600, gitignored, guard-protected).
+4. Done — `setup`/`sync` now work with no CLI anywhere:
+   ```bash
+   python3 infinite/scripts/google_docs.py --dir . setup
+   ```
+
+If Google returns no refresh token (you approved this app before), revoke it at
+<https://myaccount.google.com/permissions> and run `login` again.
+
+## Setup with a computer (gws CLI)
 
 ### 1. Install the CLI
 
@@ -69,41 +120,48 @@ the OS keyring; `GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file` for headless).
 
 ### OpenHands Cloud (hosted sandbox, no browser)
 
-Cloud sandboxes have no browser and don't come with `gws`, but OpenHands Cloud
-exports **Settings → Secrets** entries as environment variables in the agent
-runtime. The helper understands one extra variable so the secret never has to
-pass through the agent's shell or the chat:
+Cloud sandboxes have no browser and don't come with `gws` — and with the
+built-in REST transport, **they don't need it**. OpenHands Cloud exports
+**Settings → Secrets** entries as environment variables in the agent runtime,
+and the helper understands credential secrets directly, so nothing sensitive
+passes through the agent's shell or the chat. Pick ONE of these two routes:
 
-1. On your local machine (browser available): install `gws`, run
-   `gws auth setup` + `gws auth login`, then export the credentials:
-   ```bash
-   gws auth export --unmasked > gws-credentials.json
-   ```
+**Route 1 — no computer at all (device-code login).** Follow the
+[Phone-only setup](#phone-only-setup-no-computer-needed) above: create a
+'TVs and Limited Input devices' OAuth client from your phone browser, store
+`GOOGLE_WORKSPACE_CLI_CLIENT_ID`/`_CLIENT_SECRET` as secrets, and have the
+agent run `google_docs.py login` — you approve the printed code from your
+phone. Credentials land in `.infinite/gws-credentials.json` and the REST
+transport uses them.
+
+**Route 2 — exported credentials secret** (if you have any machine with a
+browser, a Cloud shell works too):
+
+1. Install `gws` there, run `gws auth setup` + `gws auth login`, then
+   `gws auth export --unmasked > gws-credentials.json`.
 2. In OpenHands Cloud: **Settings → Secrets → Add a new secret** with
    - Name: `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` (or `GWS_CREDENTIALS_JSON`)
    - Value: the **entire contents** of `gws-credentials.json`
    Secrets are masked in the UI and never appear in the conversation. Start a
    **new conversation** after saving (secrets reach conversations started
    afterwards).
-3. `gws` itself must exist in the sandbox. The agent (or a first message from
-   you) can install it once per sandbox — the installer prints this hint when
-   `gws` is missing:
-   ```bash
-   npm install -g @googleworkspace/cli     # if the runtime has Node 18+
-   # or download a binary from https://github.com/googleworkspace/cli/releases
-   ```
-4. Nothing else. When `scripts/google_docs.py` runs (setup/sync/doctor, or the
-   automatic post-compile mirror) it detects the secret env var, writes it to
+3. When `scripts/google_docs.py` runs (setup/sync/doctor, or the automatic
+   post-compile mirror) it detects the secret env var, writes it to
    `.infinite/gws-credentials.json` (mode 0600, guard-protected against agent
-   tampering), and points `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` at it for the
-   `gws` subprocesses.
+   tampering), and uses it — via the REST transport, or via
+   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for `gws` when installed.
+
+Installing `gws` inside the sandbox is optional (only needed for
+service-account keys or if you prefer the CLI):
+`npm install -g @googleworkspace/cli` (Node 18+) or a release binary from
+<https://github.com/googleworkspace/cli/releases>.
 
 Notes: `GOOGLE_WORKSPACE_CLI_TOKEN` also works as a secret but holds a raw
-access token that expires (~1 h), so prefer the exported refresh-token JSON.
-`gws` fetches Discovery documents from `googleapis.com` at runtime (cached
-24 h) — Cloud sandboxes have outbound internet, so this works; in a locked-down
-sandbox the user can run the sync from their own terminal against the same
-workspace instead.
+access token that expires (~1 h), so prefer the refresh-token routes above.
+Both transports need outbound HTTPS to `googleapis.com`, which Cloud sandboxes
+have; `gws` additionally fetches Discovery documents (cached 24 h). In a
+locked-down sandbox the user can run the sync from their own terminal against
+the same workspace instead.
 
 ### 3. Create the three documents
 
@@ -112,19 +170,21 @@ python3 infinite/scripts/google_docs.py --dir . setup
 # service-account or exported-credential setups: add --share your@gmail.com
 ```
 
-`setup` verifies authentication (`gws auth status`), creates the three Google
-Docs, and writes the receipt `.infinite/gdocs.json` with their IDs and URLs.
+`setup` verifies authentication (gws or credentials file), creates the three
+Google Docs, and writes the receipt `.infinite/gdocs.json` with their IDs and
+URLs.
 
 ## Commands
 
 ```bash
 G="python3 infinite/scripts/google_docs.py --dir ."   # or .agents/skills/infinite/scripts after install
 
-$G setup [--share EMAIL]   # check gws + auth, create the three docs, write the receipt
+$G login [--timeout N]     # device-code OAuth: prints a URL + code to approve from your phone
+$G setup [--share EMAIL]   # check auth, create the three docs, write the receipt
 $G sync                    # push compiled reports (interim; runs automatically after compile)
 $G sync --mode final       # only after the user says stop (guard-enforced)
 $G status                  # document URLs + staleness vs the ledger digest
-$G doctor                  # diagnose: gws binary, version, auth probe, receipt state
+$G doctor                  # diagnose: gws binary, auth probe, chosen transport, receipt state
 ```
 
 Useful `gws` commands directly (the CLI is general-purpose):
@@ -162,29 +222,44 @@ user stop.
 
 ## Failure handling
 
-- `gws` not installed or not authenticated: interim compiles still produce the
-  three local reports; the validator warns with install/auth instructions.
-  Final validation stays red until setup succeeds.
-- Network/API failure during a sync: `gws` exit codes are structured
-  (2 = auth, 1 = API, 4 = discovery); transient 429/5xx are retried with
-  backoff. A failed final sync leaves validation red until a retry succeeds —
-  record the blocker honestly; never claim a sync that did not happen.
-- Discovery documents are fetched at runtime (cached 24 h), so `gws` needs
-  access to `googleapis.com`; in restricted sandboxes the user can run the sync
-  from their own terminal against the same workspace.
-- Scope/consent errors: unverified OAuth apps cap at ~25 scopes in testing
-  mode — log in with `-s drive,docs` instead of the full preset, and confirm
-  your account is a Test user.
+- No transport authenticated (no gws and no credentials): interim compiles
+  still produce the three local reports; the validator warns with the login /
+  install / secret instructions. Final validation stays red until setup
+  succeeds.
+- Network/API failure during a sync: on gws, exit codes are structured
+  (2 = auth, 1 = API, 4 = discovery); on REST, HTTP statuses drive the same
+  logic. Transient 429/5xx are retried with backoff on both. A failed final
+  sync leaves validation red until a retry succeeds — record the blocker
+  honestly; never claim a sync that did not happen.
+- HTTP 401/403 on REST: the refresh token was revoked or the OAuth app is
+  missing your account as a Test user — re-run `google_docs.py login` (or
+  re-export credentials) and check
+  <https://console.cloud.google.com/apis/credentials/consent>.
+- Device login returns no refresh token: the app was approved before; revoke
+  at <https://myaccount.google.com/permissions> and log in again.
+- `gws`-specific: Discovery documents are fetched at runtime (cached 24 h), so
+  `gws` needs access to `googleapis.com`; unverified OAuth apps cap at ~25
+  scopes in testing mode — `gws auth login -s drive,docs`. Service-account
+  keys work only via `gws` (JWT signing); the REST transport supports user
+  credentials.
 
 ## Security
 
-- Authentication is entirely `gws`'s job: encrypted credential store or
-  environment-provided credentials owned by the user. No secrets live in this
-  repository, the ledger, the reports, or the receipt.
-- The agent is blocked from `gws auth export`/`logout`/`reset` and from writing
-  `~/.config/gws`, `.infinite/gdocs*.json`, or the materialized Cloud secret
-  file `.infinite/gws-credentials.json` (mode 0600, written only by the helper).
+- Credentials are user-owned. Either `gws` manages them (encrypted store, OS
+  keyring) or the helper stores them in `.infinite/gws-credentials.json`
+  (mode 0600, gitignored, written only by `login`/secret materialization). No
+  secrets live in this repository, the ledger, the reports, the receipt, or
+  the chat: secrets arrive as OpenHands environment variables and are never
+  echoed.
+- The agent is blocked from `gws auth export`/`logout`/`reset`, from writing
+  `~/.config/gws`, `.infinite/gdocs*.json`, or `.infinite/gws-credentials.json`,
+  and from printing/copying/transmitting credential env vars or files
+  (`echo $GOOGLE_WORKSPACE_CLI_CLIENT_SECRET`, `cat .infinite/gws-credentials.json`,
+  and friends are denied).
+- The device-code flow never exposes the client secret in chat; only the
+  short-lived user code and verification URL are shown.
 - The documents contain research output only; the receipt contains IDs/URLs and
   sync metadata, no secrets.
-- `gws` is not an officially supported Google product; it is the user-chosen
-  tool for these deliverables.
+- `gws` is not an officially supported Google product; the REST fallback uses
+  the same public Google Docs/Drive APIs. Both are user-chosen tools for these
+  deliverables.

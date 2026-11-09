@@ -48,30 +48,47 @@ The skill does not grant network access. If the Cloud environment restricts
 hosts, lacks a browser, or hits a paywall, record the limitation and use accessible
 primary texts/other source classes. Never pretend a blocked source was checked.
 
-## Google Docs deliverables in Cloud (gws)
+## Google Docs deliverables in Cloud
 
-The three Google Docs are published through the Google Workspace CLI (`gws`,
-https://github.com/googleworkspace/cli). Cloud sandboxes have no browser and no
-`gws` by default, so set this up from your side before starting the
-conversation:
+The three Google Docs are published by `scripts/google_docs.py`, which works
+**with or without the Google Workspace CLI**: it prefers `gws`
+(https://github.com/googleworkspace/cli) when installed and otherwise calls the
+Google Docs/Drive REST APIs directly (Python stdlib only). Cloud sandboxes
+have no browser, so authentication uses secrets + a device-code login — no CLI
+or computer required. Pick ONE route before/at the start of the conversation:
 
-1. Locally: `npm install -g @googleworkspace/cli && gws auth setup && gws auth
-   login`, then `gws auth export --unmasked > gws-credentials.json`.
-2. OpenHands Cloud → **Settings → Secrets**: add a secret named
-   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` whose value is the entire exported
-   JSON. Secrets are exported as environment variables in the agent runtime and
-   never shown in chat. Secrets reach conversations **started after** the save.
-3. In the sandbox, `gws` must be installed once (the installer prints this hint
-   when it is missing): `npm install -g @googleworkspace/cli` (Node 18+), or a
-   release binary from https://github.com/googleworkspace/cli/releases. `gws`
-   needs outbound access to `googleapis.com` (Discovery documents, API calls).
-4. That's it — `scripts/google_docs.py` materializes the secret into
-   `.infinite/gws-credentials.json` (mode 0600, guard-protected) and points
-   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` at it for its `gws` subprocesses.
-   `gws auth export`/`logout`/`reset` and writes to `~/.config/gws` are denied
-   for the agent; credentials stay user-owned.
+**Route 1 — device-code login (phone-only friendly).**
+1. From any browser (phone is fine): create a free Google Cloud project,
+   enable the Docs + Drive APIs, add yourself as an OAuth **Test user**, and
+   create an OAuth client of type **TVs and Limited Input devices**
+   (links + steps: `google-docs.md` → "Phone-only setup").
+2. OpenHands Cloud → **Settings → Secrets**: add
+   `GOOGLE_WORKSPACE_CLI_CLIENT_ID` and `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET`.
+3. Start a **new** conversation and let the agent run
+   `scripts/google_docs.py login`: it prints a URL + short code; you approve it
+   from your phone. The refresh token is saved to
+   `.infinite/gws-credentials.json` (mode 0600, gitignored, guard-protected).
 
-Until `gws` is installed and authenticated, interim compiles still produce the
+**Route 2 — exported credentials secret** (any machine with a browser):
+1. Locally: `gws auth setup && gws auth login`, then
+   `gws auth export --unmasked > gws-credentials.json`.
+2. **Settings → Secrets**: add `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` whose
+   value is the entire exported JSON. Secrets are environment variables in the
+   agent runtime, never shown in chat, and reach conversations **started
+   after** the save. The helper materializes the secret into
+   `.infinite/gws-credentials.json` automatically.
+
+Installing `gws` in the sandbox is optional (service-account keys need it):
+`npm install -g @googleworkspace/cli` (Node 18+) or a release binary from
+https://github.com/googleworkspace/cli/releases. Both transports need outbound
+HTTPS to `googleapis.com`, which Cloud sandboxes have.
+
+The agent is denied credential exfiltration: `gws auth export`/`logout`/`reset`,
+writes to `~/.config/gws` or the credential/receipt files, and printing or
+copying credential env vars/files are all blocked; credentials stay
+user-owned.
+
+Until some transport is authenticated, interim compiles still produce the
 three local reports and the Stop gate warns with these instructions; final
 validation stays red until the Google Docs are synced (details:
 `google-docs.md`).

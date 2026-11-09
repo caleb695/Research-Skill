@@ -3,20 +3,29 @@
 
 The fixed prompt requires the deliverables to be Google Documents: one FOR, one
 AGAINST, and one head-to-head COMPARISON. This helper creates and syncs those
-three documents through the Google Workspace CLI (`gws`,
-https://github.com/googleworkspace/cli), which the user installs and
-authenticates once:
+three documents with two interchangeable transports:
 
-    npm install -g @googleworkspace/cli     # or brew install googleworkspace-cli
-    gws auth setup                          # creates the Cloud project + OAuth client (needs gcloud)
-    gws auth login                          # or: manual Console setup / exported credentials
-    # headless: gws auth export --unmasked > credentials.json
-    #           export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/credentials.json
+1. the Google Workspace CLI (`gws`, https://github.com/googleworkspace/cli)
+   when it is installed — it owns authentication (encrypted store, keyring,
+   service accounts); the helper shells out to `gws docs documents
+   create|get|batchUpdate` and `gws drive permissions create`; or
+2. a built-in direct REST transport (Python standard library only) that needs
+   no CLI at all — it uses user credentials (client_id/client_secret/
+   refresh_token) to call the Google Docs + Drive APIs over HTTPS. Ideal for
+   hosted sandboxes (OpenHands Cloud) and phone-only users.
 
-`gws` owns all authentication (encrypted credential store, OS keyring, service
-accounts, raw tokens); this helper never sees or stores secrets. It shells out
-to `gws docs documents create|get|batchUpdate` (and `gws drive permissions
-create` for sharing) and parses the CLI's structured JSON output.
+Getting credentials without a computer: create a free Google Cloud project and
+an OAuth client for "TVs and Limited Input devices" in a phone browser, then run
+
+    python3 google_docs.py --dir . login
+
+which starts Google's device-code flow: it prints a short code and a URL, the
+user approves it from any browser (their phone), and the refresh token is saved
+to .infinite/gws-credentials.json (mode 0600, gitignored, guard-protected).
+Alternatively store exported credentials (gws auth export --unmasked) in the
+GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON / GWS_CREDENTIALS_JSON secret, or point
+GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE at a file. GDOCS_TRANSPORT=auto|gws|rest
+forces a transport (default auto: gws when installed, else REST).
 
 It is the only writer of the sync receipt `.infinite/gdocs.json`, and
 `infinite_research.py validate --final` refuses to pass until that receipt shows
@@ -24,12 +33,13 @@ all three documents synced at the current ledger digest in final mode — so the
 run cannot finish on local Markdown alone.
 
 Commands:
-  setup [--share EMAIL]   check gws + auth, create the three docs, write receipt
+  login                   device-code OAuth login (phone-friendly, no browser here)
+  setup [--share EMAIL]   check auth, create the three docs, write receipt
   sync [--mode M]         push the compiled reports into the three docs (M=interim|final)
   status                  show receipt, document URLs, and staleness
-  doctor                  diagnose gws installation and authentication
+  doctor                  diagnose transport, installation, and authentication
 
-Standard library only; requires the `gws` binary on PATH (override: GWS_BIN).
+Standard library only.
 """
 
 from __future__ import annotations
@@ -43,6 +53,9 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,8 +85,227 @@ INSTALL_HINT = (
     "(or brew install googleworkspace-cli, or a binary from "
     "https://github.com/googleworkspace/cli/releases), then authenticate with "
     "'gws auth login' (or 'gws auth setup', or export credentials for headless "
-    "use). Full walkthrough: references/google-docs.md"
+    "use). No computer? Run 'google_docs.py login' instead (device-code flow "
+    "you approve from your phone). Full walkthrough: references/google-docs.md"
 )
+
+# --------------------------------------------------------------------------- #
+# direct REST transport (stdlib only; used when gws is not installed)
+# --------------------------------------------------------------------------- #
+REST_TIMEOUT = 120               # seconds per HTTPS call
+DOCS_SCOPES = ("https://www.googleapis.com/auth/documents",
+               "https://www.googleapis.com/auth/drive.file")
+DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
+PROJECT_CREDS_REL = ".infinite/gws-credentials.json"   # written by login/prepare_credentials
+NO_CREDS_HINT = (
+    "no Google credentials found. Options: run 'google_docs.py login' "
+    "(device-code flow — works from a phone, needs an OAuth client for "
+    "'TVs and Limited Input devices'), or install the gws CLI "
+    "(npm install -g @googleworkspace/cli) and authenticate, or set "
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE / the "
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON secret. Walkthrough: references/google-docs.md"
+)
+
+
+def _rest_url(service: str, path: str) -> str:
+    """Absolute REST URL; GDOCS_REST_ORIGIN overrides every endpoint (tests)."""
+    override = os.environ.get("GDOCS_REST_ORIGIN")
+    if override:
+        return override.rstrip("/") + path
+    bases = {
+        "oauth": "https://oauth2.googleapis.com",
+        "docs": "https://docs.googleapis.com",
+        "drive": "https://drive.googleapis.com",
+    }
+    return bases[service] + path
+
+
+def _http_json(method: str, url: str, payload: dict | None = None,
+               form: dict | None = None, headers: dict | None = None,
+               retries: int = 3) -> dict:
+    """One HTTPS JSON call with retry/backoff on transient failures."""
+    hdrs = dict(headers or {})
+    data = None
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode("utf-8")
+        hdrs["Content-Type"] = "application/x-www-form-urlencoded"
+    elif payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        hdrs["Content-Type"] = "application/json"
+    last_error = ""
+    for attempt in range(retries):
+        request = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=REST_TIMEOUT) as response:
+                body = response.read().decode("utf-8", "replace").strip()
+                return json.loads(body) if body else {}
+        except urllib.error.HTTPError as exc:
+            body = (exc.read() or b"").decode("utf-8", "replace")[:800]
+            if exc.code in RETRY_HTTP_CODES and attempt < retries - 1:
+                last_error = f"HTTP {exc.code}: {body}"
+                time.sleep(min(2 ** attempt, 16))
+                continue
+            if exc.code in (401, 403):
+                raise GDocsError(
+                    f"Google rejected the credentials (HTTP {exc.code}): {body}. "
+                    "The refresh token may be revoked or the OAuth app missing your "
+                    "account as a test user — re-run 'google_docs.py login' (or re-export "
+                    "credentials). See references/google-docs.md") from None
+            raise GDocsError(f"{method} {url} failed (HTTP {exc.code}): {body}") from None
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            if attempt < retries - 1:
+                time.sleep(min(2 ** attempt, 16))
+                continue
+            raise GDocsError(f"{method} {url} failed after retries — {last_error}") from None
+    raise GDocsError(f"{method} {url} failed after retries — {last_error}")
+
+
+class RestCredentials:
+    """User credentials for the direct REST transport, with token refresh.
+
+    Resolution order: GOOGLE_WORKSPACE_CLI_TOKEN (raw access token) →
+    GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE → .infinite/gws-credentials.json in
+    the project (written by `login` or materialized from the JSON secret).
+    Service-account keys are rejected here (JWT signing needs the gws CLI).
+    """
+
+    def __init__(self, project: Path):
+        self._static = os.environ.get("GOOGLE_WORKSPACE_CLI_TOKEN") or None
+        self.source = "GOOGLE_WORKSPACE_CLI_TOKEN"
+        self.client_id = self.client_secret = self.refresh_token = None
+        self._token: str | None = None
+        self._expiry = 0.0
+        if self._static:
+            return
+        creds = self._load(project)
+        if creds.get("type") == "service_account":
+            raise GDocsError(
+                "the built-in REST transport supports user credentials (authorized_user); "
+                "service-account keys need the gws CLI. Either install gws, or run "
+                "'google_docs.py login' / export user credentials instead "
+                "(see references/google-docs.md)")
+        self.client_id = creds.get("client_id")
+        self.client_secret = creds.get("client_secret")
+        self.refresh_token = creds.get("refresh_token")
+        missing = [key for key, value in (("client_id", self.client_id),
+                                          ("client_secret", self.client_secret),
+                                          ("refresh_token", self.refresh_token)) if not value]
+        if missing:
+            raise GDocsError(
+                f"credentials ({self.source}) are missing: {', '.join(missing)}. "
+                "Expected the JSON from 'google_docs.py login' or 'gws auth export --unmasked'.")
+
+    def _load(self, project: Path) -> dict:
+        candidates: list[tuple[Path, str]] = []
+        env_path = os.environ.get("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE")
+        if env_path:
+            candidates.append((Path(env_path).expanduser(), f"GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ({env_path})"))
+        project_path = Path(project) / PROJECT_CREDS_REL
+        candidates.append((project_path, str(project_path)))
+        for path, label in candidates:
+            if path.is_file():
+                self.source = label
+                try:
+                    parsed = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise GDocsError(f"could not read credentials at {label}: {exc}") from exc
+                if not isinstance(parsed, dict):
+                    raise GDocsError(f"credentials at {label} are not a JSON object")
+                return parsed
+        raise GDocsError(NO_CREDS_HINT)
+
+    def access_token(self) -> str:
+        if self._static:
+            return self._static
+        if self._token and time.time() < self._expiry - 60:
+            return self._token
+        response = _http_json("POST", _rest_url("oauth", "/token"), form={
+            "client_id": self.client_id, "client_secret": self.client_secret,
+            "refresh_token": self.refresh_token, "grant_type": "refresh_token",
+        })
+        token = response.get("access_token")
+        if not token:
+            raise GDocsError(f"token refresh returned no access_token: {str(response)[:300]} — "
+                             "re-run 'google_docs.py login' if this persists")
+        self._token = str(token)
+        self._expiry = time.time() + int(response.get("expires_in", 3600))
+        return self._token
+
+
+class RestDocs:
+    """Google Docs REST surface matching the GwsDocs interface."""
+
+    def __init__(self, document_id: str, creds: RestCredentials):
+        self.document_id = document_id
+        self.creds = creds
+
+    def _headers(self) -> dict:
+        return {"Authorization": f"Bearer {self.creds.access_token()}"}
+
+    def get(self) -> dict:
+        return _http_json("GET", _rest_url("docs", f"/v1/documents/{self.document_id}"),
+                          headers=self._headers())
+
+    def batch_update(self, requests: list[dict]) -> dict:
+        if not requests:
+            return {}
+        return _http_json("POST", _rest_url("docs", f"/v1/documents/{self.document_id}:batchUpdate"),
+                          payload={"requests": requests}, headers=self._headers())
+
+    @staticmethod
+    def create(title: str, creds: RestCredentials) -> str:
+        response = _http_json("POST", _rest_url("docs", "/v1/documents"),
+                              payload={"title": title},
+                              headers={"Authorization": f"Bearer {creds.access_token()}"})
+        document_id = response.get("documentId")
+        if not document_id:
+            raise GDocsError(f"documents.create for '{title}' returned no documentId: {str(response)[:300]}")
+        return str(document_id)
+
+
+def rest_share(creds: RestCredentials, file_id: str, email: str) -> None:
+    _http_json("POST",
+               _rest_url("drive", f"/v3/files/{file_id}/permissions?sendNotificationEmail=false"),
+               payload={"role": "writer", "type": "user", "emailAddress": email},
+               headers={"Authorization": f"Bearer {creds.access_token()}"})
+
+
+class Transport:
+    """Chooses between the gws CLI and the direct REST transport."""
+
+    def __init__(self, project: Path):
+        mode = (os.environ.get("GDOCS_TRANSPORT") or "auto").strip().lower()
+        if mode not in ("auto", "gws", "rest"):
+            raise GDocsError(f"unknown GDOCS_TRANSPORT '{mode}' (expected auto, gws, or rest)")
+        binary = gws_bin()
+        if mode == "gws" and binary is None:
+            raise GDocsError(f"GDOCS_TRANSPORT=gws but {INSTALL_HINT}")
+        if mode == "rest" or (mode == "auto" and binary is None):
+            self.mode = "rest"
+            self.creds = RestCredentials(project)   # raises with NO_CREDS_HINT when unavailable
+        else:
+            self.mode = "gws"
+            self.creds = None
+
+    def create(self, title: str) -> str:
+        if self.mode == "gws":
+            return GwsDocs.create(title)
+        return RestDocs.create(title, self.creds)
+
+    def docs(self, document_id: str):
+        return GwsDocs(document_id) if self.mode == "gws" else RestDocs(document_id, self.creds)
+
+    def share(self, file_id: str, email: str) -> None:
+        if self.mode == "gws":
+            run_gws(["drive", "permissions", "create",
+                     "--params", json.dumps({"fileId": file_id, "sendNotificationEmail": False}),
+                     "--json", json.dumps({"role": "writer", "type": "user", "emailAddress": email})])
+        else:
+            rest_share(self.creds, file_id, email)
+
+    def label(self, detail: str) -> str:
+        return f"gws-cli:{detail}" if self.mode == "gws" else f"direct-rest:{self.creds.source}"
 
 
 class GDocsError(RuntimeError):
@@ -175,7 +407,7 @@ def run_gws(args: list[str], retries: int = 3) -> dict:
 
 
 CREDENTIALS_JSON_ENVS = ("GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON", "GWS_CREDENTIALS_JSON")
-MATERIALIZED_CREDS_REL = ".infinite/gws-credentials.json"
+MATERIALIZED_CREDS_REL = PROJECT_CREDS_REL
 
 
 def prepare_credentials(project: Path) -> None:
@@ -212,18 +444,25 @@ def prepare_credentials(project: Path) -> None:
             os.chmod(path, 0o600)
         os.environ["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = str(path)
         return
+    fallback = Path(project) / PROJECT_CREDS_REL
+    if fallback.is_file():
+        # login (or a previous run) already stored credentials in the project;
+        # expose them to gws subprocesses through the standard env var.
+        os.environ["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = str(fallback)
 
 
-def auth_probe() -> tuple[bool, str]:
-    """Cheap, local check that gws exists and holds credentials for the user."""
+def auth_probe(project: Path | None = None) -> tuple[bool, str]:
+    """Cheap, local check that some transport holds credentials for the user."""
     if os.environ.get("GOOGLE_WORKSPACE_CLI_TOKEN"):
         return True, "GOOGLE_WORKSPACE_CLI_TOKEN"
     creds_file = os.environ.get("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE")
     if creds_file and Path(creds_file).expanduser().is_file():
         return True, "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"
+    if project and (Path(project) / PROJECT_CREDS_REL).is_file():
+        return True, str(Path(project) / PROJECT_CREDS_REL)
     binary = gws_bin()
     if binary is None:
-        return False, f"gws CLI not found on PATH; {INSTALL_HINT}"
+        return False, f"no gws CLI on PATH and {NO_CREDS_HINT}"
     try:
         status = run_gws(["auth", "status"], retries=1)
     except GDocsError as exc:
@@ -415,9 +654,11 @@ class Batcher:
         self.docs.batch_update(batch)
 
 
-def sync_document(document_id: str, markdown: str, title: str) -> None:
-    """Replace the document's content with the rendered markdown report."""
-    docs = GwsDocs(document_id)
+def sync_document(docs, markdown: str, title: str) -> None:
+    """Replace the document's content with the rendered markdown report.
+
+    `docs` is a GwsDocs or RestDocs handle (same get/batch_update interface).
+    """
     document = docs.get()
     end = document_end_index(document)
     batcher = Batcher(docs)
@@ -491,13 +732,16 @@ def receipt_path(project: Path) -> Path:
     return project / RECEIPT_REL
 
 
-def create_missing_documents(project: Path, receipt: dict) -> dict:
+def create_missing_documents(project: Path, receipt: dict, transport: Transport | None = None) -> dict:
     documents = receipt.get("documents") if isinstance(receipt.get("documents"), dict) else {}
+    if any(not (isinstance(documents.get(name), dict) and documents.get(name, {}).get("id"))
+           for name in DOC_NAMES):
+        transport = transport or Transport(project)
     for name in DOC_NAMES:
         entry = documents.get(name) if isinstance(documents.get(name), dict) else {}
         if entry.get("id"):
             continue
-        document_id = GwsDocs.create(TITLES[name])
+        document_id = transport.create(TITLES[name])
         entry = {"id": document_id, "title": TITLES[name],
                  "url": f"https://docs.google.com/document/d/{document_id}/edit"}
         documents[name] = entry
@@ -506,31 +750,31 @@ def create_missing_documents(project: Path, receipt: dict) -> dict:
     return receipt
 
 
-def share_documents(receipt: dict, email: str) -> None:
+def share_documents(project: Path, receipt: dict, email: str, transport: Transport | None = None) -> None:
+    transport = transport or Transport(project)
     for name in DOC_NAMES:
         entry = receipt.get("documents", {}).get(name, {})
         if not entry.get("id"):
             continue
-        run_gws(["drive", "permissions", "create",
-                 "--params", json.dumps({"fileId": entry["id"], "sendNotificationEmail": False}),
-                 "--json", json.dumps({"role": "writer", "type": "user", "emailAddress": email})])
+        transport.share(entry["id"], email)
 
 
 def sync_all(project: Path, mode: str) -> dict:
     """Sync the three compiled reports to Google Docs and update the receipt."""
     prepare_credentials(project)
-    ok, detail = auth_probe()
+    ok, detail = auth_probe(project)
     if not ok:
         raise GDocsError(detail)
+    transport = Transport(project)
     receipt = read_json(receipt_path(project), {})
-    receipt = create_missing_documents(project, receipt)
+    receipt = create_missing_documents(project, receipt, transport)
     for name in DOC_NAMES:
         report = project / REPORT_PATHS[name]
         if not report.is_file():
             raise GDocsError(f"report {report} is missing; run infinite_research.py compile first")
-        sync_document(receipt["documents"][name]["id"],
+        sync_document(transport.docs(receipt["documents"][name]["id"]),
                       report.read_text(encoding="utf-8"), TITLES[name])
-    receipt["auth"] = f"gws-cli:{detail}"
+    receipt["auth"] = transport.label(detail)
     receipt["last_sync"] = {"ts": now(), "mode": mode, "digest": ledger_digest(project),
                             "documents_synced": list(DOC_NAMES)}
     write_json(receipt_path(project), receipt)
@@ -548,7 +792,7 @@ def maybe_sync(project: Path, mode: str = "interim") -> tuple[str, str]:
     project = Path(project)
     try:
         prepare_credentials(project)
-        ok, detail = auth_probe()
+        ok, detail = auth_probe(project)
         if not ok:
             return "skipped", detail
         receipt = sync_all(project, mode)
@@ -563,6 +807,94 @@ def maybe_sync(project: Path, mode: str = "interim") -> tuple[str, str]:
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+def cmd_login(args) -> int:
+    """Device-code OAuth login — the phone-friendly path.
+
+    The sandbox has no browser; Google's device flow shows the user a short
+    code + URL to approve from any device. Requires an OAuth client of type
+    'TVs and Limited Input devices' (free; creatable from a phone browser in
+    the Google Cloud Console — see references/google-docs.md).
+    """
+    project = project_dir(args.dir)
+    client_id = args.client_id or os.environ.get("GOOGLE_WORKSPACE_CLI_CLIENT_ID")
+    client_secret = args.client_secret or os.environ.get("GOOGLE_WORKSPACE_CLI_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        print(
+            "device login needs OAuth client credentials for a 'TVs and Limited Input devices' client:\n"
+            "  1. open https://console.cloud.google.com/apis/credentials in any browser (phone is fine)\n"
+            "  2. create project if needed, enable the Google Docs API and Google Drive API,\n"
+            "     add yourself as a Test user on the OAuth consent screen\n"
+            "  3. Create credentials -> OAuth client ID -> TVs and Limited Input devices\n"
+            "  4. save the client ID + secret as OpenHands secrets GOOGLE_WORKSPACE_CLI_CLIENT_ID\n"
+            "     and GOOGLE_WORKSPACE_CLI_CLIENT_SECRET (or pass --client-id/--client-secret)\n"
+            "  step-by-step: references/google-docs.md (phone-only setup)", file=sys.stderr)
+        return 1
+    try:
+        start = _http_json("POST", _rest_url("oauth", "/device/code"),
+                           form={"client_id": client_id, "scope": " ".join(DOCS_SCOPES)})
+    except GDocsError as exc:
+        print(f"device login could not start: {exc}", file=sys.stderr)
+        return 1
+    device_code = start.get("device_code")
+    user_code = start.get("user_code")
+    if not device_code or not user_code:
+        print(f"unexpected device-code response: {str(start)[:300]}", file=sys.stderr)
+        return 1
+    verification = start.get("verification_url") or "https://www.google.com/device"
+    interval = max(int(start.get("interval", 5)), 1)
+    expires = int(start.get("expires_in", 1800))
+    print("=" * 64)
+    print("ON YOUR PHONE (or any browser), open:")
+    print(f"    {verification}")
+    print("and enter this code:")
+    print(f"    {user_code}")
+    print("then sign in with your Google account and approve access.")
+    print("Waiting for approval...", flush=True)
+    print("=" * 64, flush=True)
+    deadline = time.time() + min(args.timeout, expires)
+    while time.time() < deadline:
+        time.sleep(interval)
+        try:
+            response = _http_json("POST", _rest_url("oauth", "/token"), form={
+                "client_id": client_id, "client_secret": client_secret,
+                "device_code": device_code, "grant_type": DEVICE_GRANT,
+            }, retries=1)
+        except GDocsError as exc:
+            message = str(exc)
+            if "authorization_pending" in message:
+                continue
+            if "slow_down" in message:
+                interval += 5
+                continue
+            if "access_denied" in message:
+                print("login denied by the user or the OAuth app; re-run and approve.", file=sys.stderr)
+                return 1
+            if "expired_token" in message:
+                print("the device code expired; re-run login and approve promptly.", file=sys.stderr)
+                return 1
+            print(f"device login failed: {message}", file=sys.stderr)
+            return 1
+        refresh_token = response.get("refresh_token")
+        if not refresh_token:
+            print(
+                "Google returned no refresh_token (access was likely granted before). Revoke this app at "
+                "https://myaccount.google.com/permissions, then re-run login.", file=sys.stderr)
+            return 1
+        path = project / PROJECT_CREDS_REL
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "type": "authorized_user", "client_id": client_id,
+            "client_secret": client_secret, "refresh_token": refresh_token,
+        }, indent=2) + "\n", encoding="utf-8")
+        os.chmod(path, 0o600)
+        os.environ["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = str(path)
+        print(f"login complete. Credentials saved to {path} (mode 0600; gitignored; guard-protected).")
+        print("next: python3 google_docs.py --dir . setup")
+        return 0
+    print(f"timed out after {min(args.timeout, expires)}s waiting for approval; re-run login.", file=sys.stderr)
+    return 1
+
+
 def cmd_setup(args) -> int:
     project = project_dir(args.dir)
     try:
@@ -570,18 +902,19 @@ def cmd_setup(args) -> int:
     except GDocsError as exc:
         print(f"google docs setup blocked: {exc}", file=sys.stderr)
         return 1
-    ok, detail = auth_probe()
+    ok, detail = auth_probe(project)
     if not ok:
         print(f"google docs setup blocked: {detail}", file=sys.stderr)
         return 1
-    receipt = create_missing_documents(project, read_json(receipt_path(project), {}))
+    transport = Transport(project)
+    receipt = create_missing_documents(project, read_json(receipt_path(project), {}), transport)
     if args.share:
-        share_documents(receipt, args.share)
+        share_documents(project, receipt, args.share, transport)
         print(f"shared all three documents with {args.share} (writer)")
-    receipt["auth"] = f"gws-cli:{detail}"
+    receipt["auth"] = transport.label(detail)
     receipt["setup_at"] = now()
     write_json(receipt_path(project), receipt)
-    print(f"gws authentication: {detail}")
+    print(f"authentication ({transport.mode}): {detail}")
     for name in DOC_NAMES:
         entry = receipt["documents"][name]
         print(f"  {name:10s} {entry['url']}")
@@ -633,15 +966,21 @@ def cmd_doctor(args) -> int:
     except GDocsError as exc:
         print(f"credential secret problem: {exc}")
     binary = gws_bin()
-    print(f"gws binary  : {binary or 'NOT FOUND — ' + INSTALL_HINT}")
+    print(f"gws binary  : {binary or 'not found (REST fallback can still work with credentials)'}")
     if binary:
         try:
             proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=30)
             print(f"gws version : {(proc.stdout or proc.stderr).strip()[:120] or 'unknown'}")
         except (OSError, subprocess.TimeoutExpired):
             print("gws version : (could not run --version)")
-    ok, detail = auth_probe()
+    ok, detail = auth_probe(project)
     print(f"auth probe  : {'OK' if ok else 'NOT AUTHENTICATED'} — {detail}")
+    try:
+        transport = Transport(project)
+        print(f"transport   : {transport.mode}" + (f" (credentials: {transport.creds.source})"
+                                                   if transport.mode == "rest" else ""))
+    except GDocsError as exc:
+        print(f"transport   : unavailable — {exc}")
     receipt = read_json(receipt_path(project), {})
     if receipt:
         synced = receipt.get("last_sync", {})
@@ -656,7 +995,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dir", help="project workspace (default: current directory)")
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("setup", help="check gws + auth, create the three documents")
+    p = sub.add_parser("login", help="device-code OAuth login (approve from your phone; no browser needed here)")
+    p.add_argument("--client-id", help="OAuth client ID (default: GOOGLE_WORKSPACE_CLI_CLIENT_ID)")
+    p.add_argument("--client-secret", help="OAuth client secret (default: GOOGLE_WORKSPACE_CLI_CLIENT_SECRET)")
+    p.add_argument("--timeout", type=int, default=600, help="seconds to wait for approval (default 600)")
+    p.set_defaults(func=cmd_login)
+    p = sub.add_parser("setup", help="check auth, create the three documents")
     p.add_argument("--share", metavar="EMAIL", help="share the documents with this Google account (writer)")
     p.set_defaults(func=cmd_setup)
     p = sub.add_parser("sync", help="push the compiled reports into the three documents")

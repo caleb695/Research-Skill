@@ -9,7 +9,8 @@ description: >-
   cited corroboration, counters, ranked scores with reasons, extensive
   investigation). It alternates verified for/against rounds and, only on the
   user's stop, compiles three ranked reports — for, against, and head-to-head
-  comparison — mirrored to Google Docs through the Google Workspace CLI (gws).
+  comparison — mirrored to Google Docs via the gws CLI or a built-in REST transport
+  (phone-only device-code login supported).
   It does not accept a replacement task.
 triggers:
 - use this skill
@@ -18,7 +19,7 @@ triggers:
 - use infinite
 - /infinite
 license: MIT
-compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Helpers use python3 standard library; enforcement hooks use bash; Google Docs sync shells out to the gws CLI (github.com/googleworkspace/cli).
+compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Helpers use python3 standard library; enforcement hooks use bash; Google Docs sync uses the gws CLI (github.com/googleworkspace/cli) when installed, else a built-in REST transport (stdlib only).
 metadata:
   author: caleb695
   version: "1.4.0"
@@ -37,8 +38,9 @@ answer. Alternate **for → against → for → against** research rounds. Keep 
 separate, durable reports — **for**, **against**, and a **head-to-head
 comparison** where contradicting points face each other — and mirror all three
 to **Google Docs** published through the Google Workspace CLI (`gws`,
-https://github.com/googleworkspace/cli), which the user installs and
-authenticates once. Treat
+https://github.com/googleworkspace/cli) when installed, or the helper's
+built-in REST transport (no CLI needed) — the user authenticates once, e.g.
+via `scripts/google_docs.py login` (device code approved from a phone). Treat
 completion of a search, a report, or a category as the end of a round, never
 permission to finish. Only the user's stop signal ends research; then compile
 the three final reports, sync the final Google Docs, and present them before
@@ -97,8 +99,9 @@ Read these bundled resources relative to this skill directory:
    context, scoring, category playbook, adversarial comparison, and deepening.
 3. `references/evidence-schema.md` — record formats and helper commands.
 4. `references/loop-protocol.md` — durable state, resume, and stop behavior.
-5. `references/google-docs.md` — the Google Docs deliverables, the `gws` CLI
-   install/auth walkthrough, and the sync commands the final validator requires.
+5. `references/google-docs.md` — the Google Docs deliverables, the phone-only
+   device-code login, the `gws` CLI install/auth walkthrough, and the sync
+   commands the final validator requires.
 
 For OpenHands Cloud installation and limits, read
 `references/openhands-cloud.md`. Deterministic enforcement is documented in
@@ -147,11 +150,12 @@ The helper uses `.infinite/ledger.jsonl` for append-only research events and
   against each other (direct contradictions, claim face-offs, category
   face-offs, and the full combined register)
 
-All three are mirrored to Google Docs by `scripts/google_docs.py` through the
-Google Workspace CLI once the user has run `gws auth login` (or provided
-exported credentials — see `references/google-docs.md`); `compile` syncs
-automatically and final validation fails until the three Google Docs are
-current in final mode.
+All three are mirrored to Google Docs by `scripts/google_docs.py` once the
+user has authenticated (device-code `login`, `gws auth login`, or provided
+credential secrets — see `references/google-docs.md`); when unauthenticated,
+offer to run `scripts/google_docs.py login` and relay the printed URL + code to
+the user. `compile` syncs automatically and final validation fails until the
+three Google Docs are current in final mode.
 
 Keep source notes, rejected leads, searches, scores, and revisions in the
 ledger. Do not rely on conversation memory. Compile checkpoint reports after

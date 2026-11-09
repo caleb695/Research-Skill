@@ -80,13 +80,18 @@ REPORTS = {"for": Path("research/book-of-mormon-for.md"),
            "comparison": Path("research/book-of-mormon-comparison.md")}
 GDOCS_RECEIPT = Path(".infinite/gdocs.json")
 GDOCS_SETUP_HINT = (
-    "Google Docs deliverables are required by the fixed prompt. They are published "
-    "through the Google Workspace CLI (https://github.com/googleworkspace/cli): "
-    "install it once (npm install -g @googleworkspace/cli), authenticate as the "
-    "user (gws auth setup / gws auth login; headless: exported credentials via "
-    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE, or the exported JSON stored as a "
-    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON secret on hosted sandboxes), then run "
-    "scripts/google_docs.py setup and sync (see references/google-docs.md)."
+    "Google Docs deliverables are required by the fixed prompt. Authenticate once, "
+    "either way: (a) phone-friendly device login — create a free 'TVs and Limited "
+    "Input devices' OAuth client in the Google Cloud Console, store its ID/secret "
+    "as GOOGLE_WORKSPACE_CLI_CLIENT_ID/_CLIENT_SECRET secrets, and run "
+    "scripts/google_docs.py login (the user approves the printed code from any "
+    "browser); or (b) the Google Workspace CLI "
+    "(https://github.com/googleworkspace/cli) with exported credentials via "
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE / the "
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON secret. No CLI is needed in this "
+    "sandbox — the helper falls back to direct Google Docs/Drive REST calls "
+    "(stdlib only). Then run scripts/google_docs.py setup and sync "
+    "(see references/google-docs.md)."
 )
 STOP_MARKER = Path(".openhands/guard/STOP_REQUESTED")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")

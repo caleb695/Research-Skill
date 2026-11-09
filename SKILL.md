@@ -9,7 +9,8 @@ description: >-
   counters, ranked scores with reasons, extensive investigation), alternating
   for/against rounds, deduplication, cross-side evaluation, and three ranked
   final reports on stop — for, against, and head-to-head comparison — mirrored
-  to Google Docs through the Google Workspace CLI (gws). It does not accept a
+  to Google Docs through the Google Workspace CLI (gws) or a built-in REST
+  transport — including a phone-only device-code login. It does not accept a
   replacement task.
 triggers:
 - use this skill

@@ -79,33 +79,40 @@ comparison report is "one document with everything": direct contradictions where
 opposing for/against points are shown head-to-head with both counter-analyses
 and scores, claim and category face-offs, and the full combined register.
 
-### Google Docs (via the Google Workspace CLI)
+### Google Docs (gws CLI or built-in REST — your choice)
 
 The deliverables are Google Documents, not just local Markdown.
 `infinite/scripts/google_docs.py` creates and syncs three Google Docs (FOR,
 AGAINST, COMPARISON) through the **Google Workspace CLI**
-([github.com/googleworkspace/cli](https://github.com/googleworkspace/cli)),
-which you install and authenticate once — `gws` owns all credentials, the skill
-never handles tokens or secrets:
+([github.com/googleworkspace/cli](https://github.com/googleworkspace/cli)) when
+it is installed — or, with **nothing installed at all**, through a built-in
+direct REST transport (Python stdlib) using your Google credentials. Either
+way credentials stay user-owned and out of the chat:
 
 ```bash
+# Option A — with a computer, via the gws CLI:
 npm install -g @googleworkspace/cli   # or brew install googleworkspace-cli
-gws auth setup                        # creates the Cloud project + OAuth client (needs gcloud)
-gws auth login                        # or manual Console setup / exported credentials for headless
+gws auth setup && gws auth login      # creates the Cloud project + OAuth client, logs you in
 python3 infinite/scripts/google_docs.py --dir . setup   # creates the three Docs
+
+# Option B — phone-only / no CLI anywhere (device-code login):
+# create a free "TVs and Limited Input devices" OAuth client in the Google
+# Cloud Console (phone browser works), then:
+python3 infinite/scripts/google_docs.py --dir . login   # prints a URL + code to approve on your phone
+python3 infinite/scripts/google_docs.py --dir . setup
 ```
 
-Headless alternative: `gws auth export --unmasked > credentials.json` on a
-browser machine, then `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/credentials.json`.
-On OpenHands Cloud, store that exported JSON as a Settings → Secrets entry named
-`GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON`; the helper materializes it into a
-private file for `gws` automatically (see
+On OpenHands Cloud, store credentials as Settings → Secrets instead:
+`GOOGLE_WORKSPACE_CLI_CLIENT_ID` + `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET` (for
+the device login), or `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` holding the
+output of `gws auth export --unmasked` — the helper materializes secrets into
+a private file automatically (see
 [`infinite/references/google-docs.md`](infinite/references/google-docs.md)).
-Full walkthrough (including the manual Google Cloud Console links):
+Full walkthrough (including all Google Cloud Console links):
 [`infinite/references/google-docs.md`](infinite/references/google-docs.md).
-`compile` auto-syncs whenever `gws` is authenticated, and **final validation
-fails until all three Google Docs are synced at the final ledger digest** — the
-run cannot finish on local files alone.
+`compile` auto-syncs whenever a transport is authenticated, and **final
+validation fails until all three Google Docs are synced at the final ledger
+digest** — the run cannot finish on local files alone.
 
 Say **`stop`** to end research. The skill then stops searching, compiles all
 three final reports from recorded findings, and syncs the final Google Docs.
@@ -164,7 +171,7 @@ python3 infinite/scripts/infinite_research.py --dir . init
 python3 infinite/scripts/infinite_research.py --dir . status
 python3 infinite/scripts/infinite_research.py --dir . validate
 python3 infinite/scripts/infinite_state.py --dir . status
-python3 infinite/scripts/google_docs.py --dir . setup   # once, after installing + authenticating the gws CLI
+python3 infinite/scripts/google_docs.py --dir . setup   # once, after 'login' (device code) or gws auth
 python3 infinite/scripts/google_docs.py --dir . status
 ```
 

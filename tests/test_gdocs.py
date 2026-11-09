@@ -8,6 +8,7 @@ synthetic; nothing here asserts a historical or religious conclusion.
 
 from __future__ import annotations
 
+import http.server
 import importlib.util
 import json
 import os
@@ -15,7 +16,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.parse
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -243,7 +246,8 @@ class FakeGwsTestCase(unittest.TestCase):
         for key in ("GWS_BIN", "FAKE_GWS_STATE", "FAKE_GWS_UNAUTH", "FAKE_GWS_FAIL_AUTH",
                     "GOOGLE_WORKSPACE_CLI_TOKEN", "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE",
                     "GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON", "GWS_CREDENTIALS_JSON",
-                    "INFINITE_GDOCS"):
+                    "GOOGLE_WORKSPACE_CLI_CLIENT_ID", "GOOGLE_WORKSPACE_CLI_CLIENT_SECRET",
+                    "GDOCS_TRANSPORT", "GDOCS_REST_ORIGIN", "INFINITE_GDOCS"):
             self._saved_env[key] = os.environ.pop(key, None)
         os.environ["GWS_BIN"] = str(self.fake)
         os.environ["FAKE_GWS_STATE"] = str(self.state_file)
@@ -280,11 +284,12 @@ class TransportTests(FakeGwsTestCase):
         self.assertTrue(ok)
         self.assertEqual(detail, "GOOGLE_WORKSPACE_CLI_TOKEN")
 
-    def test_missing_binary_skips_sync_with_install_hint(self):
+    def test_missing_binary_and_credentials_skips_sync_with_hints(self):
         os.environ["GWS_BIN"] = str(self.root / "definitely-not-here")
         self.init_project()
         status, message = gdocs.maybe_sync(self.project, "interim")
         self.assertEqual(status, "skipped")
+        self.assertIn("google_docs.py login", message)
         self.assertIn("npm install -g @googleworkspace/cli", message)
 
     def test_auth_error_surfaces_actionable_failure(self):
@@ -396,6 +401,259 @@ class TransportTests(FakeGwsTestCase):
         self.assertIn("google docs: all three Google Docs updated via gws", proc.stdout)
         receipt = json.loads((self.project / ".infinite/gdocs.json").read_text(encoding="utf-8"))
         self.assertEqual(receipt["last_sync"]["digest"], gdocs.ledger_digest(self.project))
+
+
+class FakeGoogleAPI(http.server.BaseHTTPRequestHandler):
+    """In-process fake of oauth2.googleapis.com + Docs/Drive REST (via GDOCS_REST_ORIGIN)."""
+
+    def log_message(self, *args):  # silence request logging
+        pass
+
+    def _send(self, code, obj):
+        body = json.dumps(obj).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length).decode("utf-8") if length else ""
+        if "application/x-www-form-urlencoded" in (self.headers.get("Content-Type") or ""):
+            return {k: v[0] for k, v in urllib.parse.parse_qs(raw).items()}
+        return json.loads(raw) if raw else {}
+
+    def _doc_content(self, doc):
+        content = []
+        for start_str, table in sorted(doc["tables"].items(), key=lambda kv: int(kv[0])):
+            start = int(start_str)
+            rows = []
+            for r in range(table["rows"]):
+                cells = [{"content": [{"startIndex": start + 1 + 2 * (r * table["cols"] + c)}]}
+                         for c in range(table["cols"])]
+                rows.append({"tableCells": cells})
+            content.append({"startIndex": start, "endIndex": table["end"],
+                            "table": {"tableRows": rows}})
+        content.append({"endIndex": doc["end"]})
+        return content
+
+    def _apply(self, doc, requests):
+        for request in requests:
+            self.server.state["batches"] += 1
+            if "insertText" in request:
+                doc["end"] += len(request["insertText"].get("text", ""))
+            elif "deleteContentRange" in request:
+                rng = request["deleteContentRange"].get("range", {})
+                doc["end"] = max(2, doc["end"] - (rng.get("endIndex", 0) - rng.get("startIndex", 0)))
+                doc["tables"] = {}
+            elif "insertTable" in request:
+                spec = request["insertTable"]
+                start, rows, cols = spec["location"]["index"], spec["rows"], spec["columns"]
+                length = 1 + rows * cols * 2
+                doc["tables"][str(start)] = {"rows": rows, "cols": cols, "end": start + length}
+                doc["end"] += length
+            elif "updateDocumentProperties" in request:
+                doc["title"] = request["updateDocumentProperties"]["properties"].get("title", doc["title"])
+
+    def do_POST(self):
+        state = self.server.state
+        path = self.path.split("?")[0]
+        body = self._body()
+        if path == "/device/code":
+            self._send(200, {"device_code": "dev-code-1", "user_code": "ABCD-EFGH",
+                             "verification_url": "https://www.google.com/device",
+                             "expires_in": 600, "interval": 1})
+            return
+        if path == "/token":
+            grant = body.get("grant_type", "")
+            if grant == gdocs.DEVICE_GRANT:
+                if state.get("device_pending", 0) > 0:
+                    state["device_pending"] -= 1
+                    self._send(400, {"error": "authorization_pending"})
+                else:
+                    state["device_approved"] = True
+                    self._send(200, {"access_token": "rest-access-token", "expires_in": 3600,
+                                     "refresh_token": "rest-refresh-token"})
+                return
+            if grant == "refresh_token":
+                if body.get("refresh_token") in ("rt", "rest-refresh-token") and body.get("client_id"):
+                    state["refreshes"] = state.get("refreshes", 0) + 1
+                    self._send(200, {"access_token": "rest-access-token", "expires_in": 3600})
+                else:
+                    self._send(400, {"error": "invalid_grant", "error_description": "bad refresh token"})
+                return
+            self._send(400, {"error": "unsupported_grant_type"})
+            return
+        auth = self.headers.get("Authorization", "")
+        if auth != "Bearer rest-access-token":
+            self._send(401, {"error": {"code": 401, "message": "invalid credentials"}})
+            return
+        if path == "/v1/documents":
+            state["counter"] += 1
+            doc_id = "rest-doc-%d" % state["counter"]
+            state["docs"][doc_id] = {"end": 2, "title": body.get("title", ""), "tables": {}}
+            self._send(200, {"documentId": doc_id, "title": body.get("title", "")})
+            return
+        if path.startswith("/v1/documents/") and path.endswith(":batchUpdate"):
+            doc = state["docs"].get(path.split("/v1/documents/")[1].split(":")[0])
+            if doc is None:
+                self._send(404, {"error": {"code": 404, "message": "not found"}})
+                return
+            self._apply(doc, body.get("requests", []))
+            self._send(200, {"replies": [], "revisionId": "rev-1"})
+            return
+        if path.startswith("/v3/files/") and path.endswith("/permissions"):
+            state["shares"] += 1
+            self._send(200, {"id": "perm-%d" % state["shares"], "role": "writer", "type": "user"})
+            return
+        self._send(400, {"error": {"code": 400, "message": "unsupported path %s" % path}})
+
+    def do_GET(self):
+        state = self.server.state
+        path = self.path.split("?")[0]
+        if path.startswith("/v1/documents/"):
+            doc = state["docs"].get(path.split("/v1/documents/")[1])
+            if doc is None or self.headers.get("Authorization") != "Bearer rest-access-token":
+                self._send(404 if doc is None else 401, {"error": {"code": 404}})
+                return
+            self._send(200, {"documentId": path.rsplit("/", 1)[-1], "title": doc["title"],
+                             "body": {"content": self._doc_content(doc)}})
+            return
+        self._send(400, {"error": {"code": 400, "message": "unsupported path %s" % path}})
+
+
+class RestTransportTests(FakeGwsTestCase):
+    """Direct REST fallback: no gws binary, credentials only."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ["GWS_BIN"] = str(self.root / "no-gws-here")   # force the REST transport
+        self.api_state = {"docs": {}, "counter": 0, "batches": 0, "shares": 0}
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeGoogleAPI)
+        self.server.state = self.api_state
+        self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.server_thread.start()
+        os.environ["GDOCS_REST_ORIGIN"] = "http://127.0.0.1:%d" % self.server.server_address[1]
+        self.creds_file = self.root / "creds.json"
+        self.creds_file.write_text(json.dumps({
+            "type": "authorized_user", "client_id": "cid.apps.googleusercontent.com",
+            "client_secret": "sec", "refresh_token": "rt"}), encoding="utf-8")
+        os.environ["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = str(self.creds_file)
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        super().tearDown()
+
+    def test_rest_sync_end_to_end_without_any_cli(self):
+        self.init_project()
+        status, message = gdocs.maybe_sync(self.project, "interim")
+        self.assertEqual(status, "synced", message)
+        self.assertEqual(self.api_state["counter"], 3)
+        titles = sorted(doc["title"] for doc in self.api_state["docs"].values())
+        self.assertEqual(titles, sorted(gdocs.TITLES.values()))
+        for doc in self.api_state["docs"].values():
+            self.assertGreater(doc["end"], 2)
+        self.assertGreater(self.api_state["refreshes"], 0)
+        receipt = json.loads((self.project / ".infinite/gdocs.json").read_text(encoding="utf-8"))
+        self.assertTrue(receipt["auth"].startswith("direct-rest:"), receipt["auth"])
+        for name in gdocs.DOC_NAMES:
+            self.assertTrue(receipt["documents"][name]["id"].startswith("rest-doc-"))
+
+    def test_rest_final_sync_and_share_via_setup(self):
+        self.init_project()
+        proc = subprocess.run(
+            [sys.executable, str(GDOCS), "--dir", str(self.project), "setup", "--share", "user@example.com"],
+            capture_output=True, text=True, env=dict(os.environ))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("authentication (rest)", proc.stdout)
+        self.assertEqual(self.api_state["shares"], 3)
+        status, message = gdocs.maybe_sync(self.project, "final")
+        self.assertEqual(status, "synced", message)
+        receipt = json.loads((self.project / ".infinite/gdocs.json").read_text(encoding="utf-8"))
+        self.assertEqual(receipt["last_sync"]["mode"], "final")
+        self.assertEqual(receipt["last_sync"]["digest"], gdocs.ledger_digest(self.project))
+
+    def test_rest_credentials_from_project_login_file(self):
+        """Credentials written by `login` at .infinite/gws-credentials.json are picked up."""
+        del os.environ["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"]
+        self.init_project()
+        path = self.project / ".infinite/gws-credentials.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"type": "authorized_user", "client_id": "cid",
+                                    "client_secret": "sec", "refresh_token": "rt"}), encoding="utf-8")
+        os.chmod(path, 0o600)
+        status, message = gdocs.maybe_sync(self.project, "interim")
+        self.assertEqual(status, "synced", message)
+        self.assertEqual(os.environ.get("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"), str(path))
+
+    def test_device_login_command_writes_credentials(self):
+        self.init_project()
+        del os.environ["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"]
+        self.api_state["device_pending"] = 1   # one authorization_pending poll, then success
+        env = dict(os.environ)
+        env["GOOGLE_WORKSPACE_CLI_CLIENT_ID"] = "cid.apps.googleusercontent.com"
+        env["GOOGLE_WORKSPACE_CLI_CLIENT_SECRET"] = "sec"
+        proc = subprocess.run(
+            [sys.executable, str(GDOCS), "--dir", str(self.project), "login", "--timeout", "30"],
+            capture_output=True, text=True, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ABCD-EFGH", proc.stdout)
+        self.assertIn("www.google.com/device", proc.stdout)
+        path = self.project / ".infinite/gws-credentials.json"
+        self.assertTrue(path.is_file())
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["refresh_token"], "rest-refresh-token")
+        self.assertEqual(saved["type"], "authorized_user")
+        self.assertTrue(self.api_state["device_approved"])
+
+    def test_device_login_without_client_explains_console_steps(self):
+        self.init_project()
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("GOOGLE_WORKSPACE_CLI_CLIENT_ID", "GOOGLE_WORKSPACE_CLI_CLIENT_SECRET")}
+        proc = subprocess.run(
+            [sys.executable, str(GDOCS), "--dir", str(self.project), "login"],
+            capture_output=True, text=True, env=env)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("TVs and Limited Input devices", proc.stderr)
+        self.assertIn("console.cloud.google.com", proc.stderr)
+
+    def test_service_account_key_rejected_on_rest_with_guidance(self):
+        self.creds_file.write_text(json.dumps({
+            "type": "service_account", "client_id": "x"}), encoding="utf-8")
+        self.init_project()
+        status, message = gdocs.maybe_sync(self.project, "interim")
+        self.assertEqual(status, "failed")
+        self.assertIn("service-account keys need the gws CLI", message)
+
+    def test_bad_refresh_token_fails_actionably(self):
+        self.creds_file.write_text(json.dumps({
+            "type": "authorized_user", "client_id": "cid",
+            "client_secret": "sec", "refresh_token": "revoked"}), encoding="utf-8")
+        self.init_project()
+        status, message = gdocs.maybe_sync(self.project, "interim")
+        self.assertEqual(status, "failed")
+        self.assertIn("invalid_grant", message)
+
+    def test_gws_still_preferred_when_binary_exists(self):
+        os.environ["GWS_BIN"] = str(self.fake)   # auto must pick gws over REST
+        self.init_project()
+        status, _ = gdocs.maybe_sync(self.project, "interim")
+        self.assertEqual(status, "synced")
+        receipt = json.loads((self.project / ".infinite/gdocs.json").read_text(encoding="utf-8"))
+        self.assertTrue(receipt["auth"].startswith("gws-cli:"), receipt["auth"])
+        self.assertEqual(self.api_state["counter"], 0, "REST endpoints must not be used")
+
+    def test_transport_override_env(self):
+        os.environ["GWS_BIN"] = str(self.fake)
+        os.environ["GDOCS_TRANSPORT"] = "rest"
+        self.init_project()
+        status, _ = gdocs.maybe_sync(self.project, "interim")
+        self.assertEqual(status, "synced")
+        receipt = json.loads((self.project / ".infinite/gdocs.json").read_text(encoding="utf-8"))
+        self.assertTrue(receipt["auth"].startswith("direct-rest:"), receipt["auth"])
 
 
 if __name__ == "__main__":

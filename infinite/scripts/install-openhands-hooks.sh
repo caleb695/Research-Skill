@@ -312,9 +312,10 @@ if [ "$RESEARCH" -eq 1 ]; then
     if ! command -v "${GWS_BIN:-gws}" >/dev/null 2>&1; then
         echo
         echo "note: the 'gws' Google Workspace CLI was not found on PATH."
-        echo "      The three Google Docs deliverables (for/against/comparison) are published through it:"
-        echo "        npm install -g @googleworkspace/cli   # or brew install googleworkspace-cli"
-        echo "        gws auth setup && gws auth login      # one-time, user-owned authentication"
+        echo "      That is fine — google_docs.py falls back to direct Google Docs/Drive REST calls."
+        echo "      Authenticate once (either way):"
+        echo "        python3 infinite/scripts/google_docs.py --dir . login   # device code; approve from your phone"
+        echo "        # or install gws (npm install -g @googleworkspace/cli) and: gws auth setup && gws auth login"
         echo "      Details: infinite/references/google-docs.md"
     fi
 fi

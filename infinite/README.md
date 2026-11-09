@@ -37,21 +37,23 @@ never fabricated.
 - `references/evidence-schema.md` — JSON records and helper commands.
 - `references/loop-protocol.md` — durable state, resume, stop/finalization.
 - `references/google-docs.md` — Google Docs deliverables, Google Cloud Console
-  `gws` CLI install/auth walkthrough, sync commands, enforcement.
+  phone-only device-code login, `gws` CLI install/auth walkthrough, sync commands, enforcement.
 - `references/openhands-cloud.md` — Cloud loading and portability checks.
 - `references/openhands-enforcement.md` — deterministic user-owned hooks.
 - `scripts/infinite_research.py` — stdlib ledger, scoring, dedup, validator, and
   three-report compiler with the six-step evidence validator.
 - `scripts/google_docs.py` — stdlib Google Docs mirror that publishes the three
-  reports through the Google Workspace CLI (`gws`); writes the sync receipt the
-  final validator requires.
+  reports through the Google Workspace CLI (`gws`) when installed, else direct
+  Google Docs/Drive REST calls (device-code `login` supported for phone-only
+  users); writes the sync receipt the final validator requires.
 - `scripts/infinite_state.py` — round cursor, alternating side, dry-round count.
 - `scripts/infinite_guard.py` and hook dispatchers — deterministic enforcement.
 
 The workspace receives `.infinite/` scratch state and three deliverables:
 `research/book-of-mormon-for.md`, `research/book-of-mormon-against.md`, and
 `research/book-of-mormon-comparison.md` — all three mirrored to Google Docs
-published through the user's authenticated Google Workspace CLI (`gws`).
+published through the user's own Google authentication (`gws` CLI or the
+helper's built-in REST transport).
 
 ## Install
 
@@ -84,11 +86,12 @@ or reports, compile final reports before the stop, or disarm itself. Say
 ## Requirements and limits
 
 Python 3 standard library for helpers; bash for enforcement hooks; an agent with
-web/browser access for online research. The Google Docs deliverables need the
-Google Workspace CLI (`gws`, https://github.com/googleworkspace/cli) installed
-and authenticated by the user — `npm install -g @googleworkspace/cli` then
-`gws auth login`; the skill never handles credentials itself. The skill does not
-grant network access. OpenHands iteration/budget/context limits still apply;
+web/browser access for online research. The Google Docs deliverables need a
+one-time user authentication: either the Google Workspace CLI
+(`npm install -g @googleworkspace/cli` then `gws auth login`), or — with no CLI
+and no computer — `google_docs.py login` (device-code flow approved from a
+phone; see `references/google-docs.md`). The skill never displays or transmits
+credentials. The skill does not grant network access. OpenHands iteration/budget/context limits still apply;
 checkpoint and resume. Scores are ordinal research judgments, not probabilities
 of truth. The validator checks structure and consistency, not historical
 reality.

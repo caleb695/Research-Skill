@@ -69,9 +69,11 @@ Note that people can lie and people can be wrong so don’t take everything at f
 - The final deliverables are **three** reports — for, against, and a head-to-head
   comparison where every contradicting point is pointed against its opposite —
   and all three are mirrored into **Google Docs** published through the Google
-  Workspace CLI (`gws`, https://github.com/googleworkspace/cli) authenticated as
-  the user (see `references/google-docs.md`). Final validation fails until all
-  three Google Docs are synced at the final ledger digest.
+  Workspace CLI (`gws`, https://github.com/googleworkspace/cli) or the helper's
+  built-in REST transport, authenticated as the user (device-code
+  `google_docs.py login` supported for phone-only users; see
+  `references/google-docs.md`). Final validation fails until all three Google
+  Docs are synced at the final ledger digest.
 - The rest of this skill package defines how to execute the fixed prompt:
   alternating for/against rounds, authentication, context/POV, multi-source
   corroboration, counters, scoring, deduplication, cross-side evaluation, a

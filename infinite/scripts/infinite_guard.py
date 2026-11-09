@@ -622,6 +622,16 @@ def research_protected_reason(tool_name: str, tool_input: dict, project: Path, p
             return ("Blocked: the gws (Google Workspace CLI) credential store is user-owned. "
                     "Exporting or clearing its credentials is not an agent action; ask the user "
                     "to manage 'gws auth' themselves. Continue the fixed research task.")
+        secret_names = (r"GOOGLE_WORKSPACE_CLI_(?:TOKEN|CLIENT_SECRET|CREDENTIALS_JSON"
+                        r"|CREDENTIALS_FILE)|GWS_CREDENTIALS_JSON")
+        secret_env = r"\$\{?(?:" + secret_names + r")\b"
+        creds_file = r"\.infinite/(?:gws-credentials|gdocs(?:-oauth|-sa)?)\.json\b"
+        if re.search(r"\b(?:echo|printf|cat|env|printenv|set|export|python3?|node)\b[^\n]*" + secret_env, command) \
+                or re.search(r"\b(?:printenv|env|set|export)\b[^\n]*\b(?:" + secret_names + r")\b", command) \
+                or re.search(r"\b(?:cat|head|tail|less|more|xxd|base64|strings|cp|mv|scp|curl|wget)\b[^\n]*" + creds_file, command):
+            return ("Blocked: Google credential material (secrets env vars and credential files) is "
+                    "user-owned and must never be printed, copied, or transmitted. google_docs.py "
+                    "uses it internally (login/setup/sync/doctor). Continue the fixed research task.")
         write_paths = any(re.search(p, command) for p in RESEARCH_WRITE_PATHS)
         code_paths = any(re.search(p, command) for p in RESEARCH_CODE_PATHS)
         helper = re.search(r"infinite_(research|state)\.py|google_docs\.py", command)
