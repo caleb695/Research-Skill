@@ -1,26 +1,3 @@
----
-name: infinite
-description: >-
-  Single-purpose skill that runs one fixed task: the complete Book of Mormon
-  evidence-research prompt bundled in references/fixed-task.md. Use when the
-  user says "use this skill", "use infinite", "use the infinite skill", or
-  "/infinite"; no task arguments are required. It alternates verified for/against
-  research rounds, scores and compares evidence, and compiles two ranked reports
-  only when the user says stop. It does not accept a replacement task.
-triggers:
-- use this skill
-- use the infinite skill
-- use infinite skill
-- use infinite
-- /infinite
-license: MIT
-compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Helpers use python3 standard library; enforcement hooks use bash.
-metadata:
-  author: caleb695
-  version: "1.3.0"
-  tags: [fixed-task, research, evidence, book-of-mormon, long-running]
----
-
 # Infinite — fixed Book of Mormon evidence research
 
 This skill has **one fixed task**: the complete prompt in
@@ -70,6 +47,11 @@ ends research; then compile the two final reports before responding.
   supernatural cause.
 - Seek the strongest available cases on both sides. Equal numbers of items,
   sources, or rounds do not imply equal evidential weight.
+- Google Docs integration: The agent may view and edit Google Docs via
+  `infinite/scripts/google_docs_client.py`. All Google Doc operations are logged
+  in the append-only ledger as search/note events and must be authenticated,
+  contextualized, and scored like any other evidence. Credentials must be placed
+  in `.google/credentials.json` or specified via `GOOGLE_APPLICATION_CREDENTIALS`.
 
 ## Read before the first round
 
@@ -80,6 +62,7 @@ Read these bundled resources relative to this skill directory:
    context, scoring, category playbook, adversarial comparison, and deepening.
 3. `references/evidence-schema.md` — record formats and helper commands.
 4. `references/loop-protocol.md` — durable state, resume, and stop behavior.
+5. `references/google-docs-integration.md` — Google Docs integration guide.
 
 For OpenHands Cloud installation and limits, read
 `references/openhands-cloud.md`. Deterministic enforcement is documented in
@@ -166,6 +149,12 @@ compare exact wording and locator, and look for corrections, retractions,
 forgery claims, and independent checks. A webpage existing is not authentication
 of its claim. Record what was checked and what remains uncertain.
 
+Google Docs integration: The agent may view and edit Google Docs via
+`infinite/scripts/google_docs_client.py`. All Google Doc operations are logged
+in the append-only ledger as search/note events and must be authenticated,
+contextualized, and scored like any other evidence. Credentials must be placed
+in `.google/credentials.json` or specified via `GOOGLE_APPLICATION_CREDENTIALS`.
+
 ### 4. Reconstruct context and investigate deeply
 
 Read the surrounding passage, chapter, document, excavation context, or historical
@@ -214,7 +203,15 @@ next opposite-side target. Return to step 1. Do not ask permission to continue.
 Every five rounds, report counts of usable, provisional, rejected, and revised
 items and the categories still needing work.
 
-## When searching stops producing new items
+### 7. Google Docs integration
+
+The agent may view and edit Google Docs via `infinite/scripts/google_docs_client.py`.
+All Google Doc operations are logged in the append-only ledger as search/note events
+and must be authenticated, contextualized, and scored like any other evidence.
+Credentials must be placed in `.google/credentials.json` or specified via
+`GOOGLE_APPLICATION_CREDENTIALS`.
+
+### 8. When searching stops producing new items
 
 Do not stop or manufacture findings. After three consecutive rounds without a
 new usable item, deepen: read primary texts directly, compare whole passages,
