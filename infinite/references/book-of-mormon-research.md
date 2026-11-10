@@ -43,8 +43,6 @@ Checklist:
   -market objects with no secure findspot.
 4. Search for corrections, retractions, forgery analyses, and methodological
    critiques. Record the checks actually performed, including negative results.
-   The helper requires at least three substantive recorded checks per item
-   (prompt step 1 is code-enforced, not optional).
 5. Identify independence. Two apologists citing the same speculative article,
    or two critics citing the same unverified claim, are one source chain.
 6. Separate “this person said X” from “X happened.” A historical account can be
@@ -70,14 +68,6 @@ Wikipedia, Reddit, Quora, anonymous forums, social-media posts, AI-generated
 summaries, and unsourced blogs are **not evidence**. They may suggest a search
 term or a primary citation to verify. A reliable outlet's summary is a lead to
 the underlying study or document, not a substitute for checking it.
-
-The fixed prompt also says to avoid biased sources except as leads: a source
-whose value is pointing at a claim to investigate — promotional material,
-partisan summaries, advocacy pages — is recorded with `role: "lead-only"`. The
-helper then refuses to let lead-only sources count toward the multiple-source
-requirement or appear in the corroboration block of a verified item. Bias that
-survives checking (an identifiable institution publishing its own data) is
-labeled, not disqualifying.
 
 Do not exclude a source merely because it is LDS-affiliated or critical. Label
 the affiliation, funding/purpose where known, expertise, and whether the source
@@ -132,12 +122,6 @@ relevance from compensating for a fabricated or irrelevant source. Provenance
 caps apply after the calculation: `fabricated` → 0, `unverified` → at most 49,
 `disputed` → at most 69. An authentic object with a disputed interpretation can
 still be `verified`; put the interpretive uncertainty in the ratings and context.
-
-A category cap encodes the fixed prompt's "witnesses (weighed less!)":
-`witnesses`-category evidence and claims are capped at 69 overall on both sides,
-after the provenance cap. Witness testimony can still be recorded, contextualized,
-and compared in full — it simply cannot outrank the cap, however sincere or
-numerous the accounts are.
 
 Scores are **ordinal research judgments**, not calibrated probabilities or a
 truth percentage. Do not add them, average them into a verdict, or subtract the
@@ -227,20 +211,13 @@ reset the counter.
 
 ## 10. Final reports
 
-The helper renders exactly three Markdown reports from the ledger and mirrors
-them to Google Docs with the user's credentials (see `google-docs.md`): the FOR
-report, the AGAINST report, and the COMPARISON report. Each side report includes
-methods and assumptions; overall and within-category claim ranks; category
-rankings; a canonical evidence register with one overall score and the four
-component ratings; full provenance/context/corroboration/counter-evaluation/
-investigation detail; rejected/quarantined leads; source inventory; search
-coverage; limitations; and original synthesis. The comparison report contains
-everything on both sides pointed against each other: direct contradictions
-rendered head-to-head (both observations, both counter-analyses, both scores,
-and which currently scores higher on the recorded rubric), claim face-offs,
-category face-offs, items still pending an opponent, and the full combined
-register with detail for every item. Claims reference evidence IDs so a shared
-item is not copied into multiple full entries.
+The helper renders exactly two side-specific Markdown reports from the ledger.
+Each includes methods and assumptions; overall and within-category claim ranks;
+category rankings; a canonical evidence register with one overall score and the
+four component ratings; full provenance/context/counter-evaluation detail;
+rejected/quarantined leads; source inventory; search coverage; limitations; and
+original synthesis. Claims reference evidence IDs so a shared item is not copied
+into multiple full entries.
 
 The final prose must explain the strongest case on each side and the most
 important unresolved disputes. It must not announce a numerical probability of

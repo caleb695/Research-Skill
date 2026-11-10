@@ -199,12 +199,6 @@ def main() -> int:
         check("indefinitely research online for evidence for and against the Book of Mormon" in fixed_text,
               "fixed prompt contains the original research task")
         check("When I say stop" in fixed_text, "fixed prompt contains the original stop/report instruction")
-        check("One document for, one against, and one with both against each other" in fixed_text,
-              "fixed prompt contains the three-report instruction")
-        check("Third, Check multiple sources" in fixed_text,
-              "fixed prompt contains the six-step per-item contract")
-        check("google-docs.md" in fixed_text or "Google Docs" in fixed_text,
-              "fixed prompt names the Google Docs deliverables")
     check("generic audit" not in body and "unrelated coding task" not in body,
           "canonical skill does not fall back to generic unrelated work")
 

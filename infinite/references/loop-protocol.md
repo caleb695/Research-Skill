@@ -14,8 +14,7 @@ iteration cap does not erase findings. This skill runs only the prompt in
 
 <project>/research/
 ├── book-of-mormon-for.md
-├── book-of-mormon-against.md
-└── book-of-mormon-comparison.md   everything on both sides, pointed against each other
+└── book-of-mormon-against.md
 
 <project>/.openhands/guard/   user-owned enforcement state
 ├── config.json       mirror of the loaded policy
@@ -27,14 +26,8 @@ iteration cap does not erase findings. This skill runs only the prompt in
 ```
 
 `.infinite/` is scratch state; keep it out of Git unless the user explicitly wants
-the raw ledger preserved. It also holds the Google Docs sync receipt
-(`gdocs.json`) and the user-owned Google credentials file
-(`gws-credentials.json`, mode 0600, written by `google_docs.py login` or from a
-credential secret); `gws` CLI users keep credentials in `~/.config/gws` or
-`GOOGLE_WORKSPACE_CLI_*` env vars instead — never commit credentials. The three
-Markdown reports are deliverables, published as Google Docs by
-`scripts/google_docs.py` via `gws` or direct REST (see `google-docs.md`). Never
-commit `.openhands/guard/`. Hook wiring may be committed when the user wants it to travel
+the raw ledger preserved. The two Markdown reports are deliverables. Never commit
+`.openhands/guard/`. Hook wiring may be committed when the user wants it to travel
 with the repo; use the installer's portable relative commands.
 
 ## Initialize and log
@@ -75,10 +68,6 @@ python3 infinite/scripts/infinite_research.py --dir . compile
 python3 infinite/scripts/infinite_research.py --dir . validate
 ```
 
-`compile` also mirrors the three reports to Google Docs whenever the user's
-credentials are configured; a failed interim sync is reported but never blocks
-the local checkpoint.
-
 A round record looks like:
 
 ```json
@@ -89,14 +78,14 @@ Append only. Never rewrite history to look better. If a source was wrong, append
 a revision and keep the rejected/corrected trail. Do not log a check you did not
 perform. With enforcement hooks installed, ledger/report writes must go through
 the validating helpers; hand edits are denied. If scripts are unavailable and no
-hooks are installed, maintain the same fields by hand and keep the three reports
+hooks are installed, maintain the same fields by hand and keep the two reports
 current; do not silently drop findings.
 
 ## Resuming
 
 On `continue`, `resume`, `use this skill`, `/infinite`, compaction, or a new run:
 
-1. Read `state.json`, recent ledger events, and all three reports.
+1. Read `state.json`, recent ledger events, and both reports.
 2. Run the research validator; repair stale reports or broken references from the
    ledger before adding new findings.
 3. If a prior user stop was recorded and the user now explicitly continues, run
@@ -114,17 +103,13 @@ supported from the conversation and mark uncertain reconstructions explicitly.
 1. Stop searching immediately. Finish only the current atomic file write.
 2. Do not start another research round. Reconcile recorded findings, duplicates,
    corrections, and claim links.
-3. Run `infinite_research.py compile --final`, then
-   `google_docs.py sync --mode final`, then `validate --final`. With the research
-   hook installed, the user's stop message creates `STOP_REQUESTED`; the Stop gate
-   checks the three final reports and the Google Docs receipt, and allows
-   finishing only when all pass. The user's installer `--disarm` is an override,
-   not an agent action.
-4. Present all three reports with their Google Docs links, and a short closing
-   summary: strongest claims each side, the decisive head-to-head contradictions
-   from the comparison report, category coverage, decisive uncertainties,
-   rejected leads, access limits, and resume instructions. This is the one time a
-   final summary is appropriate.
+3. Run `infinite_research.py compile --final`, then `validate --final`. With the
+   research hook installed, the user's stop message creates `STOP_REQUESTED`; the
+   Stop gate checks the final reports and allows finishing when they pass. The
+   user's installer `--disarm` is an override, not an agent action.
+4. Present both reports and a short closing summary: strongest claims each side,
+   category coverage, decisive uncertainties, rejected leads, access limits, and
+   resume instructions. This is the one time a final summary is appropriate.
 5. A later explicit continue resumes from the ledger; it does not erase history.
 
 Never try to disarm research enforcement yourself. A stop ends research and moves

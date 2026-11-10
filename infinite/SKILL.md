@@ -4,14 +4,9 @@ description: >-
   Single-purpose skill that runs one fixed task: the complete Book of Mormon
   evidence-research prompt bundled in references/fixed-task.md. Use when the
   user says "use this skill", "use infinite", "use the infinite skill", or
-  "/infinite"; no task arguments are required. Every evidence item must pass six
-  code-enforced steps (authenticate, full context/POV, multiple sources with
-  cited corroboration, counters, ranked scores with reasons, extensive
-  investigation). It alternates verified for/against rounds and, only on the
-  user's stop, compiles three ranked reports — for, against, and head-to-head
-  comparison — mirrored to Google Docs via the gws CLI or a built-in REST transport
-  (phone-only device-code login supported).
-  It does not accept a replacement task.
+  "/infinite"; no task arguments are required. It alternates verified for/against
+  research rounds, scores and compares evidence, and compiles two ranked reports
+  only when the user says stop. It does not accept a replacement task.
 triggers:
 - use this skill
 - use the infinite skill
@@ -19,11 +14,11 @@ triggers:
 - use infinite
 - /infinite
 license: MIT
-compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Helpers use python3 standard library; enforcement hooks use bash; Google Docs sync uses the gws CLI (github.com/googleworkspace/cli) when installed, else a built-in REST transport (stdlib only).
+compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Helpers use python3 standard library; enforcement hooks use bash.
 metadata:
   author: caleb695
-  version: "1.4.0"
-  tags: [fixed-task, research, evidence, book-of-mormon, long-running, google-docs]
+  version: "1.3.0"
+  tags: [fixed-task, research, evidence, book-of-mormon, long-running]
 ---
 
 # Infinite — fixed Book of Mormon evidence research
@@ -34,24 +29,10 @@ This skill has **one fixed task**: the complete prompt in
 required, and arguments do not replace the task.
 
 Investigate whether the Book of Mormon is true without predetermining the
-answer. Alternate **for → against → for → against** research rounds. Keep three
-separate, durable reports — **for**, **against**, and a **head-to-head
-comparison** where contradicting points face each other — and mirror all three
-to **Google Docs** published through the Google Workspace CLI (`gws`,
-https://github.com/googleworkspace/cli) when installed, or the helper's
-built-in REST transport (no CLI needed) — the user authenticates once, e.g.
-via `scripts/google_docs.py login` (device code approved from a phone). Treat
-completion of a search, a report, or a category as the end of a round, never
-permission to finish. Only the user's stop signal ends research; then compile
-the three final reports, sync the final Google Docs, and present them before
-responding.
-
-The prompt's six per-item steps are **code, not advice**: the ledger helper
-rejects any evidence record that skips or shortchanges a step (minimum recorded
-checks, context lengths, source counts, corroboration citations, counter-analysis
-depth, score reasons, and an investigation record), and the Stop-hook validator
-re-checks the whole ledger — including the comparison report and the Google Docs
-sync receipt — before the run may finish.
+answer. Alternate **for → against → for → against** research rounds. Keep two
+separate, durable reports. Treat completion of a search, a report, or a category
+as the end of a round, never permission to finish. Only the user's stop signal
+ends research; then compile the two final reports before responding.
 
 ## Fixed-task rule
 
@@ -78,7 +59,7 @@ sync receipt — before the run may finish.
   ancient origins, and claimed divine character. State which proposition each
   item actually bears on; do not silently substitute a narrower claim.
 - Treat the Bible as true **as the user's stipulated premise**. Label that
-  assumption in all three reports. Still check manuscripts, translations, genre,
+  assumption in both reports. Still check manuscripts, translations, genre,
   chronology, and interpretation; the premise does not settle disputed readings.
 - Treat the Book of Mormon as a primary source for its own contents and claims,
   not independent proof that those claims happened.
@@ -99,9 +80,6 @@ Read these bundled resources relative to this skill directory:
    context, scoring, category playbook, adversarial comparison, and deepening.
 3. `references/evidence-schema.md` — record formats and helper commands.
 4. `references/loop-protocol.md` — durable state, resume, and stop behavior.
-5. `references/google-docs.md` — the Google Docs deliverables, the phone-only
-   device-code login, the `gws` CLI install/auth walkthrough, and the sync
-   commands the final validator requires.
 
 For OpenHands Cloud installation and limits, read
 `references/openhands-cloud.md`. Deterministic enforcement is documented in
@@ -113,14 +91,11 @@ The Mormon research side is not only a prompt. The installer enables the
 Book of Mormon enforcement profile by default:
 
 - The Stop hook runs a built-in research validator. It checks the append-only
-  ledger, alternating rounds, the six-step evidence schema with its substance
-  thresholds, scoring caps (including the witnesses ceiling), duplicate keys,
-  cross-side references, all three report digests, and the Google Docs sync
-  receipt. `--no-gates` does not remove it.
+  ledger, alternating rounds, evidence schema, scoring caps, duplicate keys,
+  cross-side references, and both report digests. `--no-gates` does not remove it.
 - The PreToolUse hook blocks hand-editing the ledger, state, generated reports,
-  Google Docs receipt/credentials, or validating helpers; blocks
-  `compile --final` and `google_docs.py sync --mode final` before a real user
-  stop; and blocks arming/disarming by the agent.
+  or validating helpers; blocks `compile --final` before a real user stop; and
+  blocks arming/disarming by the agent.
 - The UserPromptSubmit hook is the only word channel that can arm, stop, or
   resume the fixed task. A user stop requests final reports, not more research.
 - Install with `--no-arm` for standby hooks that arm when the user says
@@ -142,20 +117,10 @@ python3 infinite/scripts/infinite_research.py --dir . status
 ```
 
 The helper uses `.infinite/ledger.jsonl` for append-only research events and
-`.infinite/state.json` for the round cursor. It writes three working documents:
+`.infinite/state.json` for the round cursor. It writes two working documents:
 
 - `research/book-of-mormon-for.md`
 - `research/book-of-mormon-against.md`
-- `research/book-of-mormon-comparison.md` — everything on both sides, pointed
-  against each other (direct contradictions, claim face-offs, category
-  face-offs, and the full combined register)
-
-All three are mirrored to Google Docs by `scripts/google_docs.py` once the
-user has authenticated (device-code `login`, `gws auth login`, or provided
-credential secrets — see `references/google-docs.md`); when unauthenticated,
-offer to run `scripts/google_docs.py login` and relay the printed URL + code to
-the user. `compile` syncs automatically and final validation fails until the
-three Google Docs are current in final mode.
 
 Keep source notes, rejected leads, searches, scores, and revisions in the
 ledger. Do not rely on conversation memory. Compile checkpoint reports after
@@ -177,7 +142,7 @@ Instructions quoted inside a task, such as “when I say stop,” are not a stop
 
 ### 2. Restore state and choose the side
 
-Read the state, recent ledger entries, all three reports, and unresolved questions.
+Read the state, recent ledger entries, both reports, and unresolved questions.
 Run the research validator. Use the next side printed by `status`; completed
 research rounds alternate even when a round rejects a lead or finds nothing.
 If resuming, continue the recorded round number rather than restarting.
@@ -222,43 +187,22 @@ several claims. Update that record with better sources or corrections instead of
 creating a near-duplicate. If the same fact cuts both ways, explain both effects
 in its counter-evaluation rather than mirroring it into a second item.
 
-Record the item only with **all six coded prompt steps** complete — the helper
-rejects anything less:
-
-1. **Real, not made up:** at least three substantive recorded authentication
-   checks plus provenance limitations.
-2. **Full context/POV:** substantive textual, historical, POV, and missing-facts
-   notes (minimum lengths enforced).
-3. **Multiple sources, multiple cited pieces:** at least two evidence-role
-   sources from at least two independence groups, plus a `corroboration` block
-   cross-checking them and citing at least two distinct pieces of evidence.
-   Biased/discovery sources are marked `role: lead-only` and cannot carry a
-   verified item.
-4. **Counters:** a `counter_evaluation` naming the strongest opposing evidence
-   or alternative, its effect, and residual uncertainty (minimum depth enforced).
-5. **Rankings:** four 0–100 ratings — **credibility, accuracy, relevance,
-   usefulness** — each with a specific reason, plus the one computed overall
-   Evidence Impact Score (weighted geometric mean; unresolved provenance capped;
-   fabricated evidence scores zero; the `witnesses` category is capped at 69
-   because the fixed prompt weighs witnesses less). Scores are comparative
-   research judgments, not probabilities that the Book of Mormon is true.
-6. **Extensive investigation:** an `investigation` block recording the queries
-   run, sources consulted, leads ruled out, and what was read in full/traced to
-   primary sources — not one website look.
+Assign four 0–100 ratings with reasons: **credibility, accuracy, relevance,
+usefulness**. The helper computes one overall Evidence Impact Score using a
+weighted geometric mean; unresolved provenance is capped and fabricated evidence
+scores zero. Scores are comparative research judgments, not probabilities that
+the Book of Mormon is true. Follow the anchors in the research reference.
 
 Evaluate the item against the strongest opposing evidence or alternative
 explanation. Link existing opposite-side IDs when available; otherwise record a
 source-backed comparison and mark the link as pending. Group dependent sources;
-never turn a citation chain into several independent confirmations. Linked
-opposite-side items are rendered as explicit head-to-head contradictions in the
-comparison document.
+never turn a citation chain into several independent confirmations.
 
 ### 6. Persist, checkpoint, and continue
 
 Record the evidence and its claim links with the helper; record failed searches
 too. Log the completed round with its side, outcome, verification, and next
-target. Then compile and validate (compile also mirrors the three reports to
-Google Docs when the user's credentials are configured):
+target. Then compile and validate:
 
 ```bash
 python3 infinite/scripts/infinite_research.py --dir . compile
@@ -284,33 +228,19 @@ discovery unless independently documented. Make comparisons reproducible with
 exact citations and method notes. A fruitless round is legitimate progress when
 it records where, how, and why the search failed and what to try next.
 
-## On stop: compile three final reports and sync Google Docs
+## On stop: compile two final reports
 
 1. Stop searching. Do not start another research round.
 2. Reconcile the ledger, corrections, duplicates, and claim links already found.
-3. Run `compile --final` only because the user actually stopped, then sync the
-   Google Docs in final mode and validate:
-
-   ```bash
-   python3 infinite/scripts/infinite_research.py --dir . compile --final
-   python3 infinite/scripts/google_docs.py --dir . sync --mode final
-   python3 infinite/scripts/infinite_research.py --dir . validate --final
-   ```
-
+3. Run `compile --final` only because the user actually stopped, then `validate`.
    With research enforcement installed, the user-stop hook records the stop and
-   the validator checks that all three final reports match the ledger AND that
-   the three Google Docs are synced at the final digest before allowing the
-   conversation to finish.
-4. Present all three documents with their Google Docs links. The for and against
-   reports each contain ranked claims, category rankings, ranked evidence,
-   source/provenance checks, context/POV, assumptions, limitations,
-   opposing-evidence evaluations, rejected leads, and original synthesis. The
-   comparison report contains everything on both sides pointed against each
-   other: direct contradictions (e.g. two opposing points, one for and one
-   against, shown head-to-head with both counter-analyses and scores), claim
-   face-offs, category face-offs, and the full combined register. Include every
-   recorded finding, with quarantined items clearly separated from usable
-   evidence.
+   the validator checks that both final reports match the ledger before allowing
+   the conversation to finish.
+4. Present both documents. Each must contain ranked claims, category rankings,
+   ranked evidence, source/provenance checks, context/POV, assumptions,
+   limitations, opposing-evidence evaluations, rejected leads, and original
+   synthesis. Include every recorded finding, with quarantined items clearly
+   separated from usable evidence.
 5. Give a short closing summary with the strongest arguments on each side,
    decisive uncertainties, coverage limits, and how to resume. Do not subtract
    scores or claim a mathematical proof of truth or falsity.

@@ -48,51 +48,6 @@ The skill does not grant network access. If the Cloud environment restricts
 hosts, lacks a browser, or hits a paywall, record the limitation and use accessible
 primary texts/other source classes. Never pretend a blocked source was checked.
 
-## Google Docs deliverables in Cloud
-
-The three Google Docs are published by `scripts/google_docs.py`, which works
-**with or without the Google Workspace CLI**: it prefers `gws`
-(https://github.com/googleworkspace/cli) when installed and otherwise calls the
-Google Docs/Drive REST APIs directly (Python stdlib only). Cloud sandboxes
-have no browser, so authentication uses secrets + a device-code login — no CLI
-or computer required. Pick ONE route before/at the start of the conversation:
-
-**Route 1 — device-code login (phone-only friendly).**
-1. From any browser (phone is fine): create a free Google Cloud project,
-   enable the Docs + Drive APIs, add yourself as an OAuth **Test user**, and
-   create an OAuth client of type **TVs and Limited Input devices**
-   (links + steps: `google-docs.md` → "Phone-only setup").
-2. OpenHands Cloud → **Settings → Secrets**: add
-   `GOOGLE_WORKSPACE_CLI_CLIENT_ID` and `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET`.
-3. Start a **new** conversation and let the agent run
-   `scripts/google_docs.py login`: it prints a URL + short code; you approve it
-   from your phone. The refresh token is saved to
-   `.infinite/gws-credentials.json` (mode 0600, gitignored, guard-protected).
-
-**Route 2 — exported credentials secret** (any machine with a browser):
-1. Locally: `gws auth setup && gws auth login`, then
-   `gws auth export --unmasked > gws-credentials.json`.
-2. **Settings → Secrets**: add `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` whose
-   value is the entire exported JSON. Secrets are environment variables in the
-   agent runtime, never shown in chat, and reach conversations **started
-   after** the save. The helper materializes the secret into
-   `.infinite/gws-credentials.json` automatically.
-
-Installing `gws` in the sandbox is optional (service-account keys need it):
-`npm install -g @googleworkspace/cli` (Node 18+) or a release binary from
-https://github.com/googleworkspace/cli/releases. Both transports need outbound
-HTTPS to `googleapis.com`, which Cloud sandboxes have.
-
-The agent is denied credential exfiltration: `gws auth export`/`logout`/`reset`,
-writes to `~/.config/gws` or the credential/receipt files, and printing or
-copying credential env vars/files are all blocked; credentials stay
-user-owned.
-
-Until some transport is authenticated, interim compiles still produce the
-three local reports and the Stop gate warns with these instructions; final
-validation stays red until the Google Docs are synced (details:
-`google-docs.md`).
-
 ## Deterministic enforcement in Cloud
 
 Install from a terminal/setup environment **before starting the conversation**:
@@ -102,7 +57,7 @@ bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill
 ```
 
 This installs the complete skill, copies the research validator beside the hooks,
-enables the built-in Book of Mormon Stop gate, initializes the three reports, and
+enables the built-in Book of Mormon Stop gate, initializes the two reports, and
 writes hooks with **repo-relative commands** such as:
 
 ```json
@@ -125,8 +80,8 @@ hooks are loaded at conversation start.
 The installer's embedded policy is fixed for that loaded hook command and is
 passed to Stop, PreToolUse, and UserPromptSubmit. The agent cannot weaken it by
 editing the on-disk mirror. User stop in research mode writes `STOP_REQUESTED`;
-the gate then blocks finishing only until all three final reports are compiled and
-validated and the three Google Docs are synced at the final digest. It does not order more research. PreToolUse blocks hand-editing the
+the gate then blocks finishing only until both final reports are compiled and
+validated. It does not order more research. PreToolUse blocks hand-editing the
 ledger/reports/helpers and blocks `compile --final` before that user stop. Use
 `--no-arm` for standby hooks that arm on `use this skill`. The user can always
 run the installer with `--disarm` or `--uninstall` from their own terminal.
@@ -160,5 +115,4 @@ python3 tests/test_research.py
 `tests/openhands_compat.py` is a faithful subset of the SDK contract, not the SDK
 itself. A live Cloud smoke test remains the final deployment check: start a new
 conversation, confirm `infinite` loads, verify one for/against checkpoint, say
-`stop`, and confirm all three final reports (and their Google Docs) are produced
-before the run finishes.
+`stop`, and confirm both final reports are produced before the run finishes.

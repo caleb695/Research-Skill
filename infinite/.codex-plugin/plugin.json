@@ -1,7 +1,7 @@
 {
   "name": "infinite",
-  "version": "1.4.0",
-  "description": "Single-purpose fixed prompt with deterministic hook enforcement: say \"use this skill\" or /infinite to run the bundled Book of Mormon evidence-research task until stop, then compile three ranked reports (for, against, head-to-head comparison) mirrored to Google Docs via the user's own Google API.",
+  "version": "1.3.0",
+  "description": "Single-purpose fixed prompt with deterministic hook enforcement: say \"use this skill\" or /infinite to run the bundled Book of Mormon evidence-research task until stop, then compile two ranked reports.",
   "author": {
     "name": "caleb695"
   },
@@ -15,7 +15,6 @@
     "book-of-mormon",
     "long-running",
     "never-stop",
-    "enforcement",
-    "google-docs"
+    "enforcement"
   ]
 }
