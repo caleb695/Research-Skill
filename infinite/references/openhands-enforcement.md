@@ -109,16 +109,9 @@ Denied outright:
 - reading `.openhands/guard` state;
 - editing `.openhands/hooks.json` or the guard through a file tool;
 - in the research profile, hand-editing `.infinite/ledger.jsonl`,
-  `.infinite/state.json`, the three generated reports (for/against/comparison),
-  the Google Docs receipt `.infinite/gdocs.json`, the credentials file
-  `.infinite/gws-credentials.json`, the `gws` CLI credential store
-  (`~/.config/gws`), or the validating helpers (`infinite_research.py`,
-  `infinite_state.py`, `google_docs.py`); running `gws auth
-  export`/`logout`/`reset`, or printing/copying/transmitting credential env
-  vars or files, is likewise denied (credentials are user-owned);
-- in the research profile, `compile --final` or `google_docs.py sync --mode
-  final` before a real user stop, or agent-side `arm`/`disarm`/`resume` after a
-  stop until the user continues.
+  `.infinite/state.json`, the generated reports, or the validating helpers;
+- in the research profile, `compile --final` before a real user stop, or
+  agent-side `arm`/`disarm`/`resume` after a stop until the user continues.
 
 Still allowed: tests, builds, commits, ordinary file edits, and documentation
 that merely *mentions* these paths (the rule is path-based for file tools,
@@ -135,8 +128,7 @@ an agent-editable state mirror.
   short imperative messages like "ok stop now". In an active research profile,
   `stop` or `stop researching and compile the final reports` writes
   `STOP_REQUESTED` instead of immediately disarming: research ends, but finishing
-  waits for all three final reports (for, against, comparison) plus the synced
-  Google Docs to pass the configured gates. The user can still
+  waits for both final reports to pass the configured gates. The user can still
   override with the installer's `--disarm`.
 - **Arms:** `use this skill`, `use infinite`, `use the infinite skill`, `/infinite`,
   and legacy infinite phrases such as "never stop" or "until I say stop".
@@ -204,15 +196,12 @@ by `tests/openhands_compat.py`:
 ## Research profile
 
 The installer enables `profile: book-of-mormon` by default, copies the stdlib
-research helper beside the hooks, and initializes the three working reports. The
+research helper beside the hooks, and initializes the two working reports. The
 Stop hook itself runs a built-in `research-validator` gate; it is not a removable
-shell gate, so `--no-gates` and `mode=always` still enforce the fixed task. The
-validator enforces the prompt's six coded steps per evidence item, the witnesses
-score cap, all three report digests, and — at finalization — the Google Docs
-sync receipt. Deny context names the next for/against side and the evidence
-protocol instead of generic coding work. A user stop creates `STOP_REQUESTED`;
-the gate then requires `compile --final` reports whose ledger digest is current
-and three Google Docs synced at that digest in final mode. PreToolUse makes the
+shell gate, so `--no-gates` and `mode=always` still enforce the fixed task. Deny
+context names the next for/against side and the evidence protocol instead of
+generic coding work. A user stop creates `STOP_REQUESTED`; the gate then requires
+`compile --final` reports whose ledger digest is current. PreToolUse makes the
 ledger/report/helper writes helper-only and blocks premature finalization. It
 never asks for another research round after that stop. See
 [`openhands-cloud.md`](openhands-cloud.md) and [`evidence-schema.md`](evidence-schema.md).

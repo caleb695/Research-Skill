@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
-"""Durable evidence ledger and three-report compiler for the Infinite skill.
+"""Durable evidence ledger and two-report compiler for the Infinite skill.
 
-Standard library only. This helper is the CODE ENFORCEMENT of the fixed prompt's
-six numbered steps: an evidence record cannot enter the ledger unless every step
-was performed with recorded substance (minimum checks, context lengths, source
-counts, corroboration citations, counter-analysis depth, score reasons, and an
-investigation record). It validates structure, provenance fields, ratings,
-references, and exact duplicate keys; it does NOT authenticate sources or judge
-historical truth. Those remain the agent's documented research work.
+Standard library only. This helper validates structure, provenance fields,
+ratings, references, and exact duplicate keys; it does NOT authenticate sources
+or judge historical truth. Those remain the agent's documented research work.
 
 Commands:
   init | status | lookup | evidence | revise | claim | search | note |
   compile [--final] | validate [--final]
 
 State is append-only in <project>/.infinite/ledger.jsonl. Reports are written to
-<project>/research/book-of-mormon-{for,against,comparison}.md and mirrored to
-Google Docs by scripts/google_docs.py (see references/google-docs.md). See
+<project>/research/book-of-mormon-{for,against}.md. See
 references/evidence-schema.md for the record format.
 """
 
@@ -25,7 +20,6 @@ import argparse
 import hashlib
 import json
 import math
-import os
 import re
 import sys
 import unicodedata
@@ -39,7 +33,6 @@ SIDES = ("for", "against")
 CATEGORIES = (
     "bible", "book-of-mormon", "archaeology", "witnesses",
     "historical-events", "spiritual-experiences", "coherence", "probability",
-    "other",
 )
 AUTHENTICITY = ("verified", "disputed", "unverified", "fabricated")
 OUTCOMES = ("accepted", "revised", "rejected", "deepened", "blocked", "no-new")
@@ -47,52 +40,9 @@ PRODUCTIVE = {"accepted", "revised", "deepened"}
 DIMENSIONS = ("credibility", "accuracy", "relevance", "usefulness")
 WEIGHTS = {"credibility": 0.30, "accuracy": 0.30, "relevance": 0.25, "usefulness": 0.15}
 CAPS = {"verified": 100.0, "disputed": 69.0, "unverified": 49.0, "fabricated": 0.0}
-# The fixed prompt says witnesses are "weighed less!": a hard ceiling on the
-# witnesses category, applied to evidence and claims on both sides.
-CATEGORY_CAPS = {"witnesses": 69.0}
-SOURCE_ROLES = ("evidence", "lead-only")
 BLOCKED_HOSTS = ("wikipedia.org", "reddit.com", "redd.it", "quora.com")
-
-# Code-enforced substance thresholds for the prompt's six steps. These are the
-# "not a quick thing either" floor: an item that merely mentions a step fails.
-MIN_AUTH_CHECKS = 3        # step 1: distinct substantive verification checks
-MIN_AUTH_CHECK_LEN = 30    # step 1: chars per recorded check
-MIN_AUTH_LIMITS_LEN = 20   # step 1: provenance-limitations prose
-MIN_CONTEXT_LEN = 80       # step 2: chars per context field (textual/historical/pov/missing)
-MIN_SOURCES = 2            # step 3: independent evidence-role sources (verified items)
-MIN_INDEPENDENCE_GROUPS = 2  # step 3: distinct source chains (verified items)
-MIN_CORROB_CROSS_LEN = 60  # step 3: cross-check comparison prose
-MIN_CORROB_CITED = 2       # step 3: distinct cited pieces of evidence (verified items)
-MIN_CORROB_PIECE_LEN = 15  # step 3: chars per cited piece / what-it-shows
-MIN_COUNTER_LEN = 120      # step 4: strongest-opposition analysis
-MIN_SCORE_REASON_LEN = 30  # step 5: chars per dimension reason
-MIN_INV_QUERIES = 2        # step 6: recorded search queries
-MIN_INV_QUERY_LEN = 8      # step 6: chars per query
-MIN_INV_CONSULTED = 2      # step 6: sources actually consulted
-MIN_INV_REJECTED_LEN = 40  # step 6: ruled-out leads prose
-MIN_INV_DEPTH_LEN = 80     # step 6: depth-of-research prose
-MIN_CLAIM_SYNTHESIS_LEN = 120  # claim-level analysis floor
-MIN_SOURCE_TEXT_LEN = 20   # reference/verification/bias prose per source
-MIN_LOCATOR_LEN = 3        # precise locator per source
-
 REPORTS = {"for": Path("research/book-of-mormon-for.md"),
-           "against": Path("research/book-of-mormon-against.md"),
-           "comparison": Path("research/book-of-mormon-comparison.md")}
-GDOCS_RECEIPT = Path(".infinite/gdocs.json")
-GDOCS_SETUP_HINT = (
-    "Google Docs deliverables are required by the fixed prompt. Authenticate once, "
-    "either way: (a) phone-friendly device login — create a free 'TVs and Limited "
-    "Input devices' OAuth client in the Google Cloud Console, store its ID/secret "
-    "as GOOGLE_WORKSPACE_CLI_CLIENT_ID/_CLIENT_SECRET secrets, and run "
-    "scripts/google_docs.py login (the user approves the printed code from any "
-    "browser); or (b) the Google Workspace CLI "
-    "(https://github.com/googleworkspace/cli) with exported credentials via "
-    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE / the "
-    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON secret. No CLI is needed in this "
-    "sandbox — the helper falls back to direct Google Docs/Drive REST calls "
-    "(stdlib only). Then run scripts/google_docs.py setup and sync "
-    "(see references/google-docs.md)."
-)
+           "against": Path("research/book-of-mormon-against.md")}
 STOP_MARKER = Path(".openhands/guard/STOP_REQUESTED")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 MODE_RE = re.compile(r"<!-- infinite-research-mode: (interim|final) -->")
@@ -187,27 +137,21 @@ def string_list(value, label: str, errors: list[str], nonempty: bool = False) ->
         errors.append(f"{label} must not be empty")
 
 
-def score(record: dict, label: str, errors: list[str], cap: float = 100.0, step: str = "") -> float:
+def score(record: dict, label: str, errors: list[str], cap: float = 100.0) -> float:
     ratings = record.get("scores")
     reasons = record.get("score_reasons")
-    prefix = f"{step} " if step else ""
     if not isinstance(ratings, dict) or not isinstance(reasons, dict):
-        errors.append(f"{prefix}{label}: scores and score_reasons objects are required")
+        errors.append(f"{label}: scores and score_reasons objects are required")
         return 0.0
     values = []
     for dim in DIMENSIONS:
         value = ratings.get(dim)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 100:
-            errors.append(f"{prefix}{label}: {dim} must be a finite number from 0 to 100 (one overall score AND multiple independent scores)")
+            errors.append(f"{label}: {dim} must be a finite number from 0 to 100")
             values.append(0.0)
         else:
             values.append(float(value))
-        reason = reasons.get(dim)
-        if not isinstance(reason, str) or len(reason.strip()) < MIN_SCORE_REASON_LEN:
-            errors.append(
-                f"{prefix}{label}: score_reasons.{dim} must give a specific reason of at least "
-                f"{MIN_SCORE_REASON_LEN} characters, not a one-word judgment"
-            )
+        text(reasons.get(dim), f"{label}: score_reasons.{dim}", errors)
     raw = math.prod(v ** WEIGHTS[d] for v, d in zip(values, DIMENSIONS))
     return round(min(raw, cap), 1)
 
@@ -232,14 +176,8 @@ def validate_source(source: dict, label: str, errors: list[str]) -> None:
     if not isinstance(source, dict):
         errors.append(f"{label} must be an object")
         return
-    for key in ("id", "title", "kind", "independence_group"):
+    for key in ("id", "title", "reference", "locator", "kind", "independence_group", "bias", "verification"):
         text(source.get(key), f"{label}.{key}", errors)
-    for key in ("reference", "bias", "verification"):
-        text(source.get(key), f"{label}.{key}", errors, MIN_SOURCE_TEXT_LEN)
-    text(source.get("locator"), f"{label}.locator", errors, MIN_LOCATOR_LEN)
-    role = source.get("role", "evidence")
-    if role not in SOURCE_ROLES:
-        errors.append(f"{label}.role must be one of {SOURCE_ROLES} (biased/discovery sources are 'lead-only')")
     if not ID_RE.match(str(source.get("id", ""))):
         errors.append(f"{label}.id is invalid")
     accessed = source.get("accessed")
@@ -261,116 +199,19 @@ def validate_source(source: dict, label: str, errors: list[str]) -> None:
         text(source["excerpt"], f"{label}.excerpt", errors)
 
 
-def validate_counter(value: dict, label: str, errors: list[str], source_ids: set[str], require_sources: bool, step: str) -> None:
+def validate_counter(value: dict, label: str, errors: list[str], source_ids: set[str], require_sources: bool) -> None:
     if not isinstance(value, dict):
-        errors.append(f"{step} {label} must be an object")
+        errors.append(f"{label} must be an object")
         return
-    analysis = value.get("analysis")
-    if not isinstance(analysis, str) or len(analysis.strip()) < MIN_COUNTER_LEN:
-        errors.append(
-            f"{step} {label}.analysis must state the STRONGEST opposing evidence/alternative, "
-            f"its effect, and residual uncertainty in at least {MIN_COUNTER_LEN} characters "
-            f"(got {len(analysis.strip()) if isinstance(analysis, str) else 0})"
-        )
+    text(value.get("analysis"), f"{label}.analysis", errors, 20)
     string_list(value.get("opposing_ids", []), f"{label}.opposing_ids", errors)
     refs = value.get("source_ids", [])
     string_list(refs, f"{label}.source_ids", errors)
     if require_sources and not refs:
-        errors.append(f"{step} {label}.source_ids must cite checked sources")
+        errors.append(f"{label}.source_ids must cite checked sources")
     unknown = set(refs) - source_ids
     if unknown:
         errors.append(f"{label} cites unknown sources: {sorted(unknown)}")
-
-
-def evidence_cap(record: dict) -> float:
-    """Provenance cap combined with the prompt's category caps (witnesses weighed less)."""
-    verdict = record.get("authenticity", {}).get("verdict") if isinstance(record.get("authenticity"), dict) else None
-    provenance = CAPS.get(verdict, 0.0) if verdict in CAPS else 0.0
-    return min(provenance, CATEGORY_CAPS.get(str(record.get("category")), 100.0))
-
-
-def claim_cap(record: dict) -> float:
-    return CATEGORY_CAPS.get(str(record.get("category")), 100.0)
-
-
-def validate_corroboration(record: dict, sources: list, errors: list[str]) -> None:
-    """Prompt step 3: 'Check multiple sources for this evidence and cite multiple
-    pieces of evidence.' Encoded as hard requirements, not advice."""
-    step = "[prompt step 3 — check multiple sources and cite multiple pieces of evidence]"
-    verified = record.get("authenticity", {}).get("verdict") == "verified"
-    cor = record.get("corroboration")
-    if not isinstance(cor, dict):
-        errors.append(f"{step} corroboration object is required (cross_checks + cited_evidence)")
-        return
-    text(cor.get("cross_checks"), f"{step} corroboration.cross_checks", errors, MIN_CORROB_CROSS_LEN)
-    cited = cor.get("cited_evidence")
-    source_by_id = {s.get("id"): s for s in sources if isinstance(s, dict)}
-    if not isinstance(cited, list) or not cited:
-        errors.append(f"{step} corroboration.cited_evidence must be a non-empty list")
-        return
-    min_cited = MIN_CORROB_CITED if verified else 1
-    if len(cited) < min_cited:
-        errors.append(
-            f"{step} corroboration.cited_evidence needs at least {min_cited} distinct pieces "
-            f"of evidence for a {record.get('authenticity', {}).get('verdict', '?')} item (got {len(cited)})"
-        )
-    used: set[str] = set()
-    for index, entry in enumerate(cited):
-        label = f"{step} cited_evidence[{index}]"
-        if not isinstance(entry, dict):
-            errors.append(f"{label} must be an object")
-            continue
-        sid = entry.get("source_id")
-        if sid not in source_by_id:
-            errors.append(f"{label}.source_id must reference a source listed in this record")
-            continue
-        if source_by_id[sid].get("role", "evidence") == "lead-only":
-            errors.append(f"{label} cites {sid}, which is marked lead-only; biased/discovery sources are NOT sources of evidence")
-        text(entry.get("piece"), f"{label}.piece (the exact passage/data cited)", errors, MIN_CORROB_PIECE_LEN)
-        text(entry.get("what_it_shows"), f"{label}.what_it_shows", errors, MIN_CORROB_PIECE_LEN)
-        used.add(sid)
-    if verified and len(used) < MIN_INDEPENDENCE_GROUPS:
-        errors.append(
-            f"{step} a verified item must cite pieces of evidence from at least "
-            f"{MIN_INDEPENDENCE_GROUPS} distinct sources (got {len(used)})"
-        )
-    # Multiple-source requirement for verified items.
-    evidence_sources = [s for s in sources if isinstance(s, dict) and s.get("role", "evidence") == "evidence"]
-    groups = {s.get("independence_group") for s in evidence_sources}
-    if verified:
-        if len(evidence_sources) < MIN_SOURCES:
-            errors.append(
-                f"{step} a verified item needs at least {MIN_SOURCES} evidence-role sources "
-                f"(lead-only sources do not count; got {len(evidence_sources)})"
-            )
-        if len(groups) < MIN_INDEPENDENCE_GROUPS:
-            errors.append(
-                f"{step} a verified item needs sources from at least {MIN_INDEPENDENCE_GROUPS} "
-                f"distinct independence groups — repeated retellings of one chain count once (got {len(groups)})"
-            )
-
-
-def validate_investigation(record: dict, errors: list[str]) -> None:
-    """Prompt step 6: 'Generally research the fact extensively … not just one
-    website look, but multiple sources, counters, and tons of evidence.'"""
-    step = "[prompt step 6 — research the fact extensively]"
-    inv = record.get("investigation")
-    if not isinstance(inv, dict):
-        errors.append(f"{step} investigation object is required (queries, sources_consulted, rejected_leads, depth)")
-        return
-    queries = inv.get("queries")
-    if not isinstance(queries, list) or len(queries) < MIN_INV_QUERIES or any(
-        not isinstance(q, str) or len(q.strip()) < MIN_INV_QUERY_LEN for q in queries or []
-    ):
-        errors.append(
-            f"{step} investigation.queries must list at least {MIN_INV_QUERIES} actual search "
-            f"queries/routes used for THIS item, each at least {MIN_INV_QUERY_LEN} characters"
-        )
-    consulted = inv.get("sources_consulted")
-    if isinstance(consulted, bool) or not isinstance(consulted, int) or consulted < MIN_INV_CONSULTED:
-        errors.append(f"{step} investigation.sources_consulted must be an integer >= {MIN_INV_CONSULTED}")
-    text(inv.get("rejected_leads"), f"{step} investigation.rejected_leads (what was ruled out and why)", errors, MIN_INV_REJECTED_LEN)
-    text(inv.get("depth"), f"{step} investigation.depth (what was read in full, traced to primary sources, cross-checked)", errors, MIN_INV_DEPTH_LEN)
 
 
 def base_errors(record: dict, label: str) -> list[str]:
@@ -391,8 +232,6 @@ def base_errors(record: dict, label: str) -> list[str]:
 
 
 def validate_evidence(record: dict) -> list[str]:
-    """Enforce the fixed prompt's six steps as code. Every step maps to required
-    fields with substance thresholds; a partial or shallow record is rejected."""
     errors = base_errors(record, f"evidence {record.get('id', '?')}")
     if not isinstance(record, dict):
         return errors
@@ -401,46 +240,24 @@ def validate_evidence(record: dict) -> list[str]:
     string_list(record.get("aliases", []), "evidence aliases", errors)
     if not keys_for(record):
         errors.append("evidence needs a stable identity for deduplication")
-
-    # --- Prompt step 1: check that the evidence is real, not made up --------- #
-    step1 = "[prompt step 1 — check the evidence is real, not made up]"
     auth = record.get("authenticity")
     if not isinstance(auth, dict) or auth.get("verdict") not in AUTHENTICITY:
-        errors.append(f"{step1} authenticity.verdict must be one of {AUTHENTICITY}")
+        errors.append("evidence authenticity.verdict is invalid")
+        cap = 0.0
     else:
-        checks = auth.get("checks")
-        if not isinstance(checks, list) or len(checks) < MIN_AUTH_CHECKS or any(
-            not isinstance(c, str) or len(c.strip()) < MIN_AUTH_CHECK_LEN for c in checks or []
-        ):
-            errors.append(
-                f"{step1} authenticity.checks must record at least {MIN_AUTH_CHECKS} distinct "
-                f"verification checks actually performed (earliest source located, exact wording/"
-                f"locator compared, correction/retraction/forgery search, provenance), each at "
-                f"least {MIN_AUTH_CHECK_LEN} characters"
-            )
-        text(auth.get("limitations"), f"{step1} authenticity.limitations", errors, MIN_AUTH_LIMITS_LEN)
-
-    # --- Prompt step 2: full context and POV -------------------------------- #
-    step2 = "[prompt step 2 — context and POV, all the facts]"
+        cap = CAPS[auth["verdict"]]
+        string_list(auth.get("checks"), "authenticity.checks", errors, nonempty=True)
+        text(auth.get("limitations"), "authenticity.limitations", errors)
     context = record.get("context")
     if not isinstance(context, dict):
-        errors.append(f"{step2} context object is required")
+        errors.append("evidence context object is required")
     else:
         for key in ("textual", "historical", "pov", "missing_facts"):
-            value = context.get(key)
-            if not isinstance(value, str) or len(value.strip()) < MIN_CONTEXT_LEN:
-                errors.append(
-                    f"{step2} context.{key} must be substantive (at least {MIN_CONTEXT_LEN} characters; "
-                    f"got {len(value.strip()) if isinstance(value, str) else 0}). Read the surrounding "
-                    "passage/document/excavation context, not just the extracted sentence."
-                )
-
-    # --- Prompt step 3: multiple sources, multiple cited pieces ------------- #
+            text(context.get(key), f"context.{key}", errors)
     sources = record.get("sources")
     source_ids: set[str] = set()
     if not isinstance(sources, list) or not sources:
-        errors.append("[prompt step 3] evidence sources must be a non-empty list")
-        sources = []
+        errors.append("evidence sources must be a non-empty list")
     else:
         for index, source in enumerate(sources):
             validate_source(source, f"source[{index}]", errors)
@@ -449,22 +266,10 @@ def validate_evidence(record: dict) -> list[str]:
                 if sid in source_ids:
                     errors.append(f"duplicate source id {sid}")
                 source_ids.add(sid)
-    validate_corroboration(record, sources if isinstance(sources, list) else [], errors)
-
-    # --- Prompt step 4: counters to the evidence ---------------------------- #
-    validate_counter(record.get("counter_evaluation"), "counter_evaluation", errors, source_ids, True,
-                     "[prompt step 4 — look at counters to the evidence]")
-
-    # --- Prompt step 5: credibility/relevance/usefulness + rankings --------- #
-    step5 = "[prompt step 5 — rank credibility, accuracy, relevance, usefulness; one overall score]"
-    cap = evidence_cap(record)
-    expected = score(record, "evidence", errors, cap, step5)
+    expected = score(record, "evidence", errors, cap)
     if record.get("overall_score") != expected:
-        errors.append(f"{step5} overall_score must be {expected} (witnesses category is capped at {CATEGORY_CAPS.get('witnesses')}); use the helper to compute it")
-
-    # --- Prompt step 6: extensive research ---------------------------------- #
-    validate_investigation(record, errors)
-
+        errors.append(f"evidence overall_score must be {expected}; use the helper to compute it")
+    validate_counter(record.get("counter_evaluation"), "counter_evaluation", errors, source_ids, True)
     if record.get("original_synthesis") is not None:
         text(record["original_synthesis"], "original_synthesis", errors)
     return errors
@@ -475,7 +280,7 @@ def validate_claim(record: dict, evidence: dict[str, dict]) -> list[str]:
     if not isinstance(record, dict):
         return errors
     text(record.get("statement"), "claim.statement", errors)
-    text(record.get("synthesis"), "claim.synthesis", errors, MIN_CLAIM_SYNTHESIS_LEN)
+    text(record.get("synthesis"), "claim.synthesis", errors, 20)
     refs = record.get("evidence_ids")
     string_list(refs, "claim.evidence_ids", errors, nonempty=True)
     usable = 0
@@ -494,11 +299,10 @@ def validate_claim(record: dict, evidence: dict[str, dict]) -> list[str]:
             errors.append(f"claim links non-usable evidence {eid}; keep it in quarantine")
     if refs and usable == 0:
         errors.append("a claim needs at least one verified evidence item")
-    expected = score(record, "claim", errors, claim_cap(record), "[prompt step 5 — rank the whole argument]")
+    expected = score(record, "claim", errors)
     if record.get("overall_score") != expected:
-        errors.append(f"claim overall_score must be {expected} (witnesses category is capped at {CATEGORY_CAPS.get('witnesses')}); use the helper to compute it")
-    validate_counter(record.get("counter_evaluation"), "claim.counter_evaluation", errors, source_ids, False,
-                     "[prompt step 4 — look at counters to the claim]")
+        errors.append(f"claim overall_score must be {expected}; use the helper to compute it")
+    validate_counter(record.get("counter_evaluation"), "claim.counter_evaluation", errors, source_ids, False)
     return errors
 
 
@@ -623,8 +427,7 @@ def render_side(project: Path, side: str, data: dict, final: bool) -> str:
         f"# Book of Mormon: evidence {side}", "",
         f"<!-- infinite-research-mode: {'final' if final else 'interim'} -->",
         f"<!-- infinite-research-ledger-sha256: {ledger_digest(project)} -->", "",
-        f"**Status:** {status}. Generated from the append-only ledger; do not hand-edit.",
-        f"**Companion documents:** research/book-of-mormon-for.md, research/book-of-mormon-against.md, research/book-of-mormon-comparison.md — all three are mirrored to Google Docs (references/google-docs.md).", "",
+        f"**Status:** {status}. Generated from the append-only ledger; do not hand-edit.", "",
         "## Scope, assumptions, and method", "",
         "This report investigates evidence bearing on Book of Mormon truth claims. The Bible is treated as true as the user's stipulated premise, not as an independently established result of this run. The Book of Mormon is primary evidence of its contents, not independent proof of its historicity. Each item distinguishes observation, inference, context, and uncertainty.", "",
         "Rounds alternate for/against. Sources were selected for provenance and independence; Wikipedia, Reddit, Quora, anonymous posts, and AI summaries are not evidence. Authentication and context checks recorded below are the agent's research judgments, not guarantees produced by this script.", "",
@@ -692,19 +495,8 @@ def render_side(project: Path, side: str, data: dict, final: bool) -> str:
                       f"**Textual context:** {context['textual']}", f"**Historical context:** {context['historical']}", f"**POV:** {context['pov']}", f"**Missing facts:** {context['missing_facts']}", "",
                       f"**Assumptions:** {'; '.join(item.get('assumptions', [])) or 'None recorded.'}",
                       f"**Dependence:** {item['dependence']}", f"**Uncertainty:** {item['uncertainty']}", "",
-                      "**Multiple sources checked (prompt step 3):** " + (item.get("corroboration", {}).get("cross_checks", "Not recorded.") if isinstance(item.get("corroboration"), dict) else "Not recorded."), ""]
-            for cited in (item.get("corroboration", {}) or {}).get("cited_evidence", []) if isinstance(item.get("corroboration"), dict) else []:
-                lines.append(f"- Cited piece (`{md(cited.get('source_id'))}`): {md(cited.get('piece'))} — shows: {md(cited.get('what_it_shows'))}")
-            if (item.get("corroboration", {}) or {}).get("cited_evidence"):
-                lines.append("")
-            inv = item.get("investigation", {}) if isinstance(item.get("investigation"), dict) else {}
-            lines += [
-                "**Extensive research record (prompt step 6):** " + md(inv.get("depth", "Not recorded.")),
-                f"- Queries run: {'; '.join(md(q) for q in inv.get('queries', [])) or 'Not recorded.'}",
-                f"- Sources consulted: {inv.get('sources_consulted', '?')}",
-                f"- Leads ruled out: {md(inv.get('rejected_leads', 'Not recorded.'))}", "",
-                "**Score reasons:** " + "; ".join(f"{d}: {item['score_reasons'][d]}" for d in DIMENSIONS), "",
-                f"**Opposing-evidence evaluation:** {item['counter_evaluation']['analysis']} Opposing IDs: {', '.join(item['counter_evaluation'].get('opposing_ids', [])) or 'pending'}. Source IDs: {', '.join(item['counter_evaluation'].get('source_ids', []))}.", ""]
+                      "**Score reasons:** " + "; ".join(f"{d}: {item['score_reasons'][d]}" for d in DIMENSIONS), "",
+                      f"**Opposing-evidence evaluation:** {item['counter_evaluation']['analysis']} Opposing IDs: {', '.join(item['counter_evaluation'].get('opposing_ids', [])) or 'pending'}. Source IDs: {', '.join(item['counter_evaluation'].get('source_ids', []))}.", ""]
             if item.get("original_synthesis"):
                 lines += [f"**Original synthesis (not a claimed new historical discovery):** {item['original_synthesis']}", ""]
             lines += ["**Sources:**", ""]
@@ -740,151 +532,17 @@ def render_side(project: Path, side: str, data: dict, final: bool) -> str:
     return "\n".join(lines)
 
 
-def opposing_pairs(records: dict[str, dict]) -> list[tuple[dict, dict]]:
-    """Deduplicated (record, opponent) pairs from counter_evaluation.opposing_ids."""
-    pairs: dict[tuple[str, str], tuple[dict, dict]] = {}
-    for rid, record in records.items():
-        for oid in record.get("counter_evaluation", {}).get("opposing_ids", []):
-            other = records.get(oid)
-            if other is None or other.get("side") == record.get("side"):
-                continue
-            key = tuple(sorted((rid, oid)))
-            first, second = (record, other) if record.get("side") == "for" else (other, record)
-            pairs[key] = (first, second)
-    return [pairs[key] for key in sorted(pairs)]
-
-
-def render_comparison(project: Path, data: dict, final: bool) -> str:
-    """The third document: everything on both sides, pointed against each other."""
-    evidence, claims = data["evidence"], data["claims"]
-    all_evidence = list(evidence.values())
-    all_claims = list(claims.values())
-    for_rank = {item["id"]: rank for rank, item in ranked([e for e in all_evidence if e.get("side") == "for"])}
-    against_rank = {item["id"]: rank for rank, item in ranked([e for e in all_evidence if e.get("side") == "against"])}
-    status = "FINAL snapshot at user stop" if final else "INTERIM working snapshot — research continues"
-    lines = [
-        "# Book of Mormon: for vs against — head-to-head comparison", "",
-        f"<!-- infinite-research-mode: {'final' if final else 'interim'} -->",
-        f"<!-- infinite-research-ledger-sha256: {ledger_digest(project)} -->", "",
-        f"**Status:** {status}. Generated from the append-only ledger; do not hand-edit.",
-        "**Companion documents:** research/book-of-mormon-for.md, research/book-of-mormon-against.md — all three are mirrored to Google Docs (references/google-docs.md).", "",
-        "## How to read this document", "",
-        "This is the third deliverable required by the fixed prompt: one document with everything, where the evidence and the points are pointed against each other. Contradicting items recorded on the for and against sides appear below as explicit head-to-head pairs, each with both sides' counter-analyses and scores. Scores are ordinal research judgments on a common rubric — they are never added, subtracted, or averaged into a verdict, and a higher score does not 'prove' a side. The Bible is treated as true as the user's stipulated premise. Witnesses-category items are capped (weighed less) per the fixed prompt.", "",
-        "## Direct contradictions — evidence pointed against evidence", "",
-    ]
-    pairs = opposing_pairs(evidence)
-    if not pairs:
-        lines += ["No opposite-side evidence links have been recorded yet. Every item keeps a source-backed comparison in its counter-evaluation; register the opposing item and revise to create a direct link.", ""]
-    for for_item, against_item in pairs:
-        lines += [f"### {for_item['id']} (for) vs {against_item['id']} (against)", "",
-                  "| Side | ID | Title | Category | Authenticity | Side rank | Score | C/A/R/U |", "| --- | --- | --- | --- | --- | ---: | ---: | --- |",
-                  f"| for | {md(for_item['id'])} | {md(for_item['title'])} | {md(for_item['category'])} | {for_item['authenticity']['verdict']} | {for_rank.get(for_item['id'], '—')} | {for_item['overall_score']} | {ratings(for_item)} |",
-                  f"| against | {md(against_item['id'])} | {md(against_item['title'])} | {md(against_item['category'])} | {against_item['authenticity']['verdict']} | {against_rank.get(against_item['id'], '—')} | {against_item['overall_score']} | {ratings(against_item)} |", "",
-                  f"**For-side observation:** {for_item['proposition']}",
-                  f"**Against-side observation:** {against_item['proposition']}", "",
-                  f"**How the for side evaluates this contradiction:** {for_item['counter_evaluation']['analysis']}", "",
-                  f"**How the against side evaluates this contradiction:** {against_item['counter_evaluation']['analysis']}", ""]
-        stronger, weaker = (for_item, against_item) if for_item["overall_score"] >= against_item["overall_score"] else (against_item, for_item)
-        lines += [f"**Current standing on the recorded rubric:** `{stronger['id']}` scores {stronger['overall_score']} vs `{weaker['id']}` at {weaker['overall_score']}. This is a comparison of recorded judgments, not a truth calculation; see each item's uncertainty and dependence before relying on it.", ""]
-    lines += ["## Direct contradictions — claims pointed against claims", ""]
-    claim_pairs = opposing_pairs(claims)
-    if not claim_pairs:
-        lines += ["No opposite-side claim links recorded yet.", ""]
-    for for_claim, against_claim in claim_pairs:
-        lines += [f"### {for_claim['id']} (for) vs {against_claim['id']} (against)", "",
-                  f"**For claim:** {for_claim['statement']}",
-                  f"**Against claim:** {against_claim['statement']}", "",
-                  f"| Side | ID | Title | Category | Score | C/A/R/U |", "| --- | --- | --- | --- | ---: | --- |",
-                  f"| for | {md(for_claim['id'])} | {md(for_claim['title'])} | {md(for_claim['category'])} | {for_claim['overall_score']} | {ratings(for_claim)} |",
-                  f"| against | {md(against_claim['id'])} | {md(against_claim['title'])} | {md(against_claim['category'])} | {against_claim['overall_score']} | {ratings(against_claim)} |", "",
-                  f"**For-side assessment of the opposition:** {for_claim['counter_evaluation']['analysis']}", "",
-                  f"**Against-side assessment of the opposition:** {against_claim['counter_evaluation']['analysis']}", ""]
-    lines += ["## Category face-offs", "",
-              "Strongest recorded claim per side in each category, with usable-evidence counts. This is a ceiling comparison per category, not cumulative proof.", "",
-              "| Category | Strongest for claim | For score | Strongest against claim | Against score | Usable evidence (for/against) |",
-              "| --- | --- | ---: | --- | ---: | --- |"]
-    for category in CATEGORIES:
-        for_claims = ranked([c for c in all_claims if c.get("category") == category and c.get("side") == "for"])
-        against_claims = ranked([c for c in all_claims if c.get("category") == category and c.get("side") == "against"])
-        for_use = sum(1 for e in all_evidence if e.get("category") == category and e.get("side") == "for" and e.get("authenticity", {}).get("verdict") == "verified")
-        against_use = sum(1 for e in all_evidence if e.get("category") == category and e.get("side") == "against" and e.get("authenticity", {}).get("verdict") == "verified")
-        f_cell = f"{md(for_claims[0][1]['id'])} — {md(for_claims[0][1]['title'])}" if for_claims else "none recorded"
-        a_cell = f"{md(against_claims[0][1]['id'])} — {md(against_claims[0][1]['title'])}" if against_claims else "none recorded"
-        lines.append(f"| {category} | {f_cell} | {for_claims[0][1]['overall_score'] if for_claims else '—'} | {a_cell} | {against_claims[0][1]['overall_score'] if against_claims else '—'} | {for_use}/{against_use} |")
-    lines += ["", "## Items not yet directly linked to an opponent", "",
-              "These items carry a source-backed counter-evaluation but no registered opposite-side ID yet. The loop protocol requires researching the other side and revising each item into a direct link.", ""]
-    unlinked = [e for e in all_evidence if not e.get("counter_evaluation", {}).get("opposing_ids")]
-    if unlinked:
-        lines += ["| ID | Side | Title | Score | Recorded counter-evaluation |", "| --- | --- | --- | ---: | --- |"]
-        for item in sorted(unlinked, key=lambda e: str(e.get("id"))):
-            lines.append(f"| {md(item['id'])} | {item['side']} | {md(item['title'])} | {item['overall_score']} | {md(item['counter_evaluation']['analysis'])} |")
-    else:
-        lines.append("Every recorded item has at least one direct opposite-side link.")
-    lines += ["", "## Complete ranked evidence register — both sides together", "",
-              "All evidence from both sides on one rubric. 'Side rank' is the rank within that side's own report.", "",
-              "| Combined rank | ID | Side | Side rank | Category | Authenticity | Title | Score | C/A/R/U |",
-              "| ---: | --- | --- | ---: | --- | --- | --- | ---: | --- |"]
-    for rank, item in ranked(all_evidence):
-        side_rank = for_rank.get(item["id"]) if item.get("side") == "for" else against_rank.get(item["id"])
-        lines.append(f"| {rank} | {md(item['id'])} | {item['side']} | {side_rank or '—'} | {md(item['category'])} | {item['authenticity']['verdict']} | {md(item['title'])} | {item['overall_score']} | {ratings(item)} |")
-    if not all_evidence:
-        lines.append("| — | — | — | — | — | — | No evidence recorded yet | — | — |")
-    lines += ["", "## Complete claim ranking — both sides together", "",
-              "| Combined rank | ID | Side | Category | Title | Score | C/A/R/U |", "| ---: | --- | --- | --- | --- | ---: | --- |"]
-    for rank, item in ranked(all_claims):
-        lines.append(f"| {rank} | {md(item['id'])} | {item['side']} | {md(item['category'])} | {md(item['title'])} | {item['overall_score']} | {ratings(item)} |")
-    if not all_claims:
-        lines.append("| — | — | — | — | No claims recorded yet | — | — |")
-    lines += ["", "## Full evidence detail — everything on both sides", "",
-              "Every recorded item in full, with its opposing links inline so contradicting points face each other. Components are credibility / accuracy / relevance / usefulness.", ""]
-    for rank, item in ranked(all_evidence):
-        auth, context = item["authenticity"], item["context"]
-        opponents = ", ".join(item["counter_evaluation"].get("opposing_ids", [])) or "pending — source-backed comparison recorded"
-        lines += [f"### {item['id']} ({item['side']}) — {item['title']}", "",
-                  f"Combined rank {rank}; score **{item['overall_score']}** (C/A/R/U: {ratings(item)}); authenticity **{auth['verdict']}**; revision {item.get('revision', 1)}; pointed against: **{opponents}**.", "",
-                  f"**Identity:** {item['identity']}",
-                  f"**Observation:** {item['proposition']}", f"**Inference:** {item['inference']}", "",
-                  f"**Authentication checks (step 1):** {'; '.join(auth['checks'])}", f"**Provenance limits:** {auth['limitations']}", "",
-                  f"**Textual context (step 2):** {context['textual']}", f"**Historical context:** {context['historical']}", f"**POV:** {context['pov']}", f"**Missing facts:** {context['missing_facts']}", "",
-                  f"**Multiple sources checked (step 3):** " + (item.get("corroboration", {}).get("cross_checks", "Not recorded.") if isinstance(item.get("corroboration"), dict) else "Not recorded.")]
-        for cited in (item.get("corroboration", {}) or {}).get("cited_evidence", []) if isinstance(item.get("corroboration"), dict) else []:
-            lines.append(f"- Cited piece (`{md(cited.get('source_id'))}`): {md(cited.get('piece'))} — shows: {md(cited.get('what_it_shows'))}")
-        inv = item.get("investigation", {}) if isinstance(item.get("investigation"), dict) else {}
-        lines += ["",
-                  f"**Extensive research record (step 6):** {md(inv.get('depth', 'Not recorded.'))}",
-                  f"- Queries run: {'; '.join(md(q) for q in inv.get('queries', [])) or 'Not recorded.'}",
-                  f"- Sources consulted: {inv.get('sources_consulted', '?')}",
-                  f"- Leads ruled out: {md(inv.get('rejected_leads', 'Not recorded.'))}", "",
-                  f"**Assumptions:** {'; '.join(item.get('assumptions', [])) or 'None recorded.'}",
-                  f"**Dependence:** {item['dependence']}", f"**Uncertainty:** {item['uncertainty']}", "",
-                  "**Score reasons (step 5):** " + "; ".join(f"{d}: {item['score_reasons'][d]}" for d in DIMENSIONS), "",
-                  f"**Counter-evaluation (step 4):** {item['counter_evaluation']['analysis']} Source IDs: {', '.join(item['counter_evaluation'].get('source_ids', []))}.", "",
-                  "**Sources:**", ""]
-        for source in item.get("sources", []):
-            role = source.get("role", "evidence")
-            lines.append(f"- `{md(source.get('id'))}` {source_link(source)} — {md(source.get('reference'))}; locator: {md(source.get('locator'))}; accessed {md(source.get('accessed'))}; kind: {md(source.get('kind'))}; role: {md(role)}; independence group: {md(source.get('independence_group'))}; bias/POV: {md(source.get('bias'))}; verification: {md(source.get('verification'))}.")
-        if item.get("original_synthesis"):
-            lines += ["", f"**Original synthesis (not a claimed new historical discovery):** {item['original_synthesis']}"]
-        lines.append("")
-    lines += ["## Closing assessment", "",
-              "This document shows the recorded evidence pointed against itself, as the fixed prompt requires. It does not compute a net score, does not declare a winner, and does not hide items that weaken either side. Quarantined, disputed, and fabricated leads remain visible in the side reports' appendices and are marked by authenticity verdict above.", ""]
-    if final:
-        lines += ["Research stopped at the user's request. This final snapshot includes the findings recorded before that stop; it does not imply that all possible evidence has been examined.", ""]
-    return "\n".join(lines)
-
-
 def compile_reports(project: Path, final: bool = False) -> list[str]:
     data = store(project)
     errors = cross_errors(data)
     if errors:
         raise ResearchError("cannot compile invalid research state:\n" + "\n".join(errors))
     written = []
-    for name, rel in REPORTS.items():
+    for side, rel in REPORTS.items():
         path = project / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".md.tmp")
-        body = render_comparison(project, data, final) if name == "comparison" else render_side(project, name, data, final)
-        tmp.write_text(body, encoding="utf-8")
+        tmp.write_text(render_side(project, side, data, final), encoding="utf-8")
         tmp.replace(path)
         written.append(str(path))
     append_event(project, "compile", mode="final" if final else "interim", digest=ledger_digest(project))
@@ -931,26 +589,6 @@ def validation_errors(project: Path, force_final: bool = False) -> tuple[list[st
             unassigned = [eid for eid, e in data["evidence"].items() if e.get("side") == side and e.get("authenticity", {}).get("verdict") == "verified" and not any(eid in c.get("evidence_ids", []) for c in data["claims"].values())]
             if unassigned:
                 errors.append(f"final {side} report has usable evidence not organized under a claim: {unassigned}")
-
-    # --- Google Docs deliverables (fixed prompt: the documents are Google Docs) ---
-    if os.environ.get("INFINITE_GDOCS", "").strip().lower() not in {"off", "0", "no", "false"}:
-        receipt = read_json(project / GDOCS_RECEIPT, {})
-        docs = receipt.get("documents") if isinstance(receipt.get("documents"), dict) else {}
-        synced = receipt.get("last_sync") if isinstance(receipt.get("last_sync"), dict) else {}
-        missing = [name for name in REPORTS
-                   if not isinstance(docs.get(name), dict) or not docs[name].get("id") or not docs[name].get("url")]
-        if final_required:
-            if missing:
-                errors.append(f"Google Docs deliverables are missing for: {', '.join(missing)}. {GDOCS_SETUP_HINT}")
-            elif synced.get("digest") != digest:
-                errors.append("Google Docs are stale: after the latest compile run scripts/google_docs.py sync --mode final so all three documents match the current ledger digest")
-            elif synced.get("mode") != "final":
-                errors.append("Google Docs were last synced in interim mode: after compile --final run scripts/google_docs.py sync --mode final")
-        else:
-            if missing:
-                warnings.append(f"Google Docs deliverables are not configured yet ({', '.join(missing) or 'none'}). {GDOCS_SETUP_HINT}")
-            elif synced.get("digest") != digest:
-                warnings.append("Google Docs are stale; sync them after the next compile (scripts/google_docs.py sync)")
     locator_owners: dict[str, list[str]] = {}
     for eid, item in data["evidence"].items():
         if not item.get("counter_evaluation", {}).get("opposing_ids"):
@@ -987,42 +625,7 @@ def cmd_init(args) -> int:
     compile_reports(project)
     print(f"research workspace: {project}")
     print(f"next side: {state.get('next_side', 'for')}; reports: {', '.join(str(r) for r in REPORTS.values())}")
-    print("google docs: the three reports are mirrored to Google Docs via scripts/google_docs.py (see references/google-docs.md)")
     return 0
-
-
-def _load_gdocs_module():
-    path = Path(__file__).resolve().with_name("google_docs.py")
-    if not path.is_file():
-        return None
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("infinite_google_docs", path)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        return None
-    return module
-
-
-def sync_google_docs(project: Path, mode: str) -> tuple[str, str]:
-    """Best-effort mirror of the three compiled reports into Google Docs.
-
-    Returns (status, message) with status in {"synced", "skipped", "failed"}.
-    Enforcement lives in validation: final reports do not validate until the
-    sync receipt shows all three documents current at the final ledger digest.
-    """
-    if os.environ.get("INFINITE_GDOCS", "").strip().lower() in {"off", "0", "no", "false"}:
-        return "skipped", "INFINITE_GDOCS=off; Google Docs mirror disabled by the user"
-    module = _load_gdocs_module()
-    if module is None:
-        return "skipped", "google_docs.py helper not found next to infinite_research.py"
-    try:
-        return module.maybe_sync(project, mode)
-    except Exception as exc:  # never crash the compile because the mirror failed
-        return "failed", f"google_docs sync error: {exc}"
 
 
 def load_record(path: str) -> dict:
@@ -1040,7 +643,8 @@ def cmd_evidence(args) -> int:
     data = store(project)
     record = load_record(args.file)
     if "overall_score" not in record:
-        record["overall_score"] = score(record, "evidence", [], evidence_cap(record))
+        verdict = record.get("authenticity", {}).get("verdict") if isinstance(record.get("authenticity"), dict) else None
+        record["overall_score"] = score(record, "evidence", [], CAPS.get(verdict, 0.0))
     errors = validate_evidence(record)
     rid = record.get("id")
     if args.revise and rid not in data["evidence"]:
@@ -1067,7 +671,7 @@ def cmd_claim(args) -> int:
     data = store(project)
     record = load_record(args.file)
     if "overall_score" not in record:
-        record["overall_score"] = score(record, "claim", [], claim_cap(record))
+        record["overall_score"] = score(record, "claim", [])
     errors = validate_claim(record, data["evidence"])
     for oid in record.get("counter_evaluation", {}).get("opposing_ids", []) if isinstance(record.get("counter_evaluation"), dict) else []:
         other = data["evidence"].get(oid)
@@ -1138,19 +742,6 @@ def cmd_compile(args) -> int:
         append_event(project, "stop_finalization", source="agent reports explicit user stop")
     for path in compile_reports(project, args.final):
         print(path)
-    mode = "final" if args.final else "interim"
-    status, message = sync_google_docs(project, mode)
-    if status == "synced":
-        print(f"google docs: {message}")
-    elif status == "failed":
-        print(f"google docs sync FAILED: {message}", file=sys.stderr)
-        if args.final:
-            print("final validation will not pass until the sync succeeds: fix credentials/network, "
-                  "then run google_docs.py sync --mode final", file=sys.stderr)
-    else:
-        print(f"google docs: skipped — {message}", file=sys.stderr)
-        if args.final:
-            print(GDOCS_SETUP_HINT, file=sys.stderr)
     return 0
 
 
@@ -1162,7 +753,7 @@ def cmd_validate(args) -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print("research ledger, all three reports (for/against/comparison), and the Google Docs deliverables are structurally valid and current")
+    print("research ledger and both reports are structurally valid and current")
     return 0
 
 

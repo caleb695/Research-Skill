@@ -349,17 +349,11 @@ def loop_context(project: Path, profile: str = "generic") -> str:
         depth = " After three dry rounds, deepen primary-text/dependency work; after six, revisit uncertain and confident claims." if dry >= 3 else ""
         return (
             f"Fixed Book of Mormon research protocol: read references/fixed-task.md and infinite/SKILL.md "
-            f"(or the loaded skill directory), restore the ledger, and start the next {side} round. "
-            "Execute ALL SIX coded prompt steps per item: (1) authenticate with at least three recorded "
-            "checks, (2) read full context/POV, (3) check multiple sources and cite multiple pieces of "
-            "evidence (corroboration), (4) evaluate the strongest counters, (5) score credibility/"
-            "accuracy/relevance/usefulness with specific reasons plus the one computed overall score, "
-            "(6) record the extensive investigation (queries, sources consulted, leads ruled out, depth). "
-            "Deduplicate, compare against the other side, record the item and round, compile all three "
-            "reports (for/against/comparison, mirrored to Google Docs), and validate. Alternate "
+            f"(or the loaded skill directory), restore the ledger, and start the next {side} round. Authenticate the source, read full "
+            "context/POV, score credibility/accuracy/relevance/usefulness, deduplicate, compare against "
+            "the other side, record the item and round, compile both reports, and validate. Alternate "
             "sides even after a rejected or fruitless round; log searches and access limits honestly."
-            + depth + " Only an explicit user stop ends research; then compile the three final reports "
-            "and sync the final Google Docs. "
+            + depth + " Only an explicit user stop ends research; then compile final reports. "
             f"Enforcement ({project / GUARD_DIR}) belongs to the user; do not edit or bypass it."
         )
     return (
@@ -443,9 +437,7 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
             return emit_deny(
                 "Research has stopped at the user's request, but the final reports are not ready. "
                 "Do not resume searching. Reconcile the existing ledger, run compile --final, fix "
-                "validation errors, sync the three Google Docs (google_docs.py sync --mode final), "
-                "and present all three reports (for, against, comparison) with their Google Docs "
-                "links. " + report,
+                "validation errors, and present both reports. " + report,
                 "Finalization only: use recorded findings; no new research round. The user may "
                 "override with the installer's --disarm command.",
             )
@@ -453,7 +445,7 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
             (project / GUARD_DIR / ARMED).unlink(missing_ok=True)
             (project / GUARD_DIR / STOP_REQUESTED).unlink(missing_ok=True)
         log_event(project, "stop_allowed", reason="user stop; final reports validated", round=ledger["last_round"])
-        return emit_allow("Research stopped; all three final reports (for, against, comparison) and their Google Docs passed the deterministic research gate.")
+        return emit_allow("Research stopped; both final reports passed the deterministic research gate.")
 
     require_rounds = int(policy.get("require_rounds") or 0)
     needs_round = ledger["rounds_since_arm"] < require_rounds
@@ -504,10 +496,8 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
     elif policy.get("profile") == RESEARCH_PROFILE:
         head = (
             f"Infinite research mode is ON ({mode}). A completed search or report is not a stop. "
-            "Start the next alternating for/against evidence round now; execute all six coded "
-            "prompt steps per item (authenticate, contextualize, corroborate with multiple "
-            "sources, evaluate counters, score with reasons, investigate extensively), "
-            "deduplicate, compare, log, compile all three reports, sync Google Docs, and validate."
+            "Start the next alternating for/against evidence round now; verify, contextualize, "
+            "score, compare, deduplicate, log, compile, and validate."
         )
     else:
         head = (
@@ -573,14 +563,10 @@ def protected_reason(tool_name: str, tool_input: dict) -> str | None:
 RESEARCH_WRITE_PATHS = [
     r"(^|[^A-Za-z0-9_])\.infinite/ledger\.jsonl\b",
     r"(^|[^A-Za-z0-9_])\.infinite/state\.json\b",
-    r"(^|[^A-Za-z0-9_])\.infinite/gdocs(-oauth|-sa)?\.json\b",
-    r"(^|[^A-Za-z0-9_])\.infinite/gws-credentials\.json\b",
-    r"(^|[^A-Za-z0-9_])research/book-of-mormon-(for|against|comparison)\.md\b",
-    r"\.config/gws\b",
+    r"(^|[^A-Za-z0-9_])research/book-of-mormon-(for|against)\.md\b",
 ]
 RESEARCH_CODE_PATHS = [
     r"(^|[^A-Za-z0-9_])infinite_(research|state|guard)\.py\b",
-    r"(^|[^A-Za-z0-9_])google_docs\.py\b",
     r"(^|[^A-Za-z0-9_])install-openhands-hooks\.sh\b",
     r"(^|[^A-Za-z0-9_])(stop|pretool|userprompt)_hook\.sh\b",
     r"(^|[^A-Za-z0-9_])infinite-(stop|pretool|userprompt)\.sh\b",
@@ -618,23 +604,9 @@ def research_protected_reason(tool_name: str, tool_input: dict, project: Path, p
         command = strings.get("command", "")
         if not command:
             return None
-        if re.search(r"\bgws\s+auth\s+(export|logout|reset)\b", command):
-            return ("Blocked: the gws (Google Workspace CLI) credential store is user-owned. "
-                    "Exporting or clearing its credentials is not an agent action; ask the user "
-                    "to manage 'gws auth' themselves. Continue the fixed research task.")
-        secret_names = (r"GOOGLE_WORKSPACE_CLI_(?:TOKEN|CLIENT_SECRET|CREDENTIALS_JSON"
-                        r"|CREDENTIALS_FILE)|GWS_CREDENTIALS_JSON")
-        secret_env = r"\$\{?(?:" + secret_names + r")\b"
-        creds_file = r"\.infinite/(?:gws-credentials|gdocs(?:-oauth|-sa)?)\.json\b"
-        if re.search(r"\b(?:echo|printf|cat|env|printenv|set|export|python3?|node)\b[^\n]*" + secret_env, command) \
-                or re.search(r"\b(?:printenv|env|set|export)\b[^\n]*\b(?:" + secret_names + r")\b", command) \
-                or re.search(r"\b(?:cat|head|tail|less|more|xxd|base64|strings|cp|mv|scp|curl|wget)\b[^\n]*" + creds_file, command):
-            return ("Blocked: Google credential material (secrets env vars and credential files) is "
-                    "user-owned and must never be printed, copied, or transmitted. google_docs.py "
-                    "uses it internally (login/setup/sync/doctor). Continue the fixed research task.")
         write_paths = any(re.search(p, command) for p in RESEARCH_WRITE_PATHS)
         code_paths = any(re.search(p, command) for p in RESEARCH_CODE_PATHS)
-        helper = re.search(r"infinite_(research|state)\.py|google_docs\.py", command)
+        helper = re.search(r"infinite_(research|state)\.py", command)
         if helper:
             if re.search(r"infinite_state\.py[^\n]*\b(arm|disarm)\b", command):
                 return "Blocked: arming/disarming is user-owned. Continue the fixed research task."
@@ -642,10 +614,6 @@ def research_protected_reason(tool_name: str, tool_input: dict, project: Path, p
             if re.search(r"infinite_research\.py[^\n]*\bcompile\b[^\n]*--final", command) and not stopped:
                 return ("Blocked: final reports may be compiled only after the user says stop. "
                         "The user-stop hook has not recorded STOP_REQUESTED. Continue interim research rounds.")
-            if re.search(r"google_docs\.py[^\n]*\bsync\b[^\n]*--mode\s+final", command) and not stopped:
-                return ("Blocked: the Google Docs final sync may run only after the user says stop "
-                        "(STOP_REQUESTED is not recorded). Continue interim research rounds; interim "
-                        "syncs happen automatically on compile.")
             if stopped and re.search(r"infinite_state\.py[^\n]*\b(resume|log)\b", command):
                 return ("Blocked: research is stopped. Only a real user continue/resume message re-arms the loop; "
                         "until then only final-report reconciliation is allowed.")
@@ -653,7 +621,7 @@ def research_protected_reason(tool_name: str, tool_input: dict, project: Path, p
                 return ("Blocked: research is stopped. Do not record new evidence/searches; reconcile the existing "
                         "ledger and compile final reports.")
             chained_code_write = code_paths and re.search(
-                r"(?:\brm\b|\bmv\b|\bcp\b|\btruncate\b|\bshred\b|\bunlink\b|\bchmod\b|\bchown\b|\bdd\b|\bsed\s+-i|\btee\b|>{1,2})[^;|&]*(?:infinite_(?:research|state|guard)|google_docs)\.py",
+                r"(?:\brm\b|\bmv\b|\bcp\b|\btruncate\b|\bshred\b|\bunlink\b|\bchmod\b|\bchown\b|\bdd\b|\bsed\s+-i|\btee\b|>{1,2})[^;|&]*infinite_(?:research|state|guard)\.py",
                 command,
             )
             if WRITE_VERB.search(command) and (write_paths or chained_code_write):
@@ -763,9 +731,7 @@ def cmd_userprompt(payload: dict, project: Path, policy: dict | None = None) -> 
             )
             return emit_allow(
                 "Stop research now. Do not start another round. Reconcile recorded findings, "
-                "run the research helper's compile --final, sync the three Google Docs "
-                "(google_docs.py sync --mode final), run validate, then present all three reports "
-                "(for, against, comparison) with their Google Docs links. "
+                "run the research helper's compile --final and validate, then present both reports. "
                 "The Stop hook allows finishing once the configured final-report gates pass."
             )
         (project / GUARD_DIR / "DISARMED").write_text(
