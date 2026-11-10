@@ -1,7 +1,4 @@
----
-name: ai-infinite-skill
-description: >-
-  Repository entry point for a single-purpose Infinite skill. Use when the user
+---\nname: ai-infinite-skill\ndescription: >-\n  Repository entry point for a single-purpose Infinite skill. Use when the user
   says "use this skill", "use infinite", "use the infinite skill", or "/infinite".
   It runs one fixed bundled Book of Mormon evidence-research prompt without
   requiring task arguments: source authentication, context/POV checks, alternating
@@ -62,17 +59,24 @@ Do not run unrelated tasks from this skill. Platform iteration/budget/network
 limits are checkpoint/resume boundaries, not permission to fabricate progress or
 override the user.
 
+Google Docs integration allows viewing and editing Google Docs via
+`infinite/scripts/google_docs_client.py`. Credentials must be placed in
+`.google/credentials.json` or specified via `GOOGLE_APPLICATION_CREDENTIALS`. All
+Google Doc operations are logged in the append-only ledger as search/note events
+and must be authenticated, contextualized, and scored like any other evidence.
+
 ## Resources
 
 | Path | Purpose |
 | --- | --- |
 | [`infinite/SKILL.md`](infinite/SKILL.md) | Canonical round contract |
 | [`infinite/references/fixed-task.md`](infinite/references/fixed-task.md) | Authoritative fixed prompt |
-| [`infinite/references/book-of-mormon-research.md`](infinite/references/book-of-mormon-research.md) | Verification, context, scoring, categories, deepening |
+| [`infinite/references/book-of-mormon-research.md`](infinite/references/book-of-mormon-research.md) | Verification, context, scoring, category playbook, adversarial comparison, and deepening |
 | [`infinite/references/evidence-schema.md`](infinite/references/evidence-schema.md) | Ledger records and helper commands |
 | [`infinite/references/loop-protocol.md`](infinite/references/loop-protocol.md) | Durable state, resume, stop/finalization |
 | [`infinite/references/openhands-cloud.md`](infinite/references/openhands-cloud.md) | Cloud loading, portable hooks, limits |
 | [`infinite/references/openhands-enforcement.md`](infinite/references/openhands-enforcement.md) | Deterministic user-owned enforcement |
+| [`infinite/references/google-docs-integration.md`](infinite/references/google-docs-integration.md) | Google Docs integration guide |
 
 Install the complete package with Book of Mormon enforcement enabled by default:
 
