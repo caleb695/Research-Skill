@@ -1,1 +1,14 @@
+{
+  "type": "service_account",
+  "project_id": "research-lds",
+  "private_key_id": "d5523d37f5459efe343674c688011299237a1aac",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDdiy0ldh4nNJP7\nNGiMYOGNxgT2TfEkAONw4qnp1sLN/nbWmWXEqQ8TTadEOKqrIskx4BcPMbHawJVF\nm8yTM9d2fGuLekfgG4PvOJh0/tBAAupWE9zZiVu+1FFaFdQHqeMojRC/ssIknNyf\nsc4tjl4RKqDQO4/rE3dCECvr2kAQ4j0ylUPFDqcR4s3pJjWJ0bfejmSy/VAN8bR9\np5xKIhuOCCENz0pViEUQws5r75lHIOcxyPKLuw+Qp4NNlB/JXZtJWYkbwQt+U0GT\nkndIekQpqP4mhpptLu90f0AvtOGWBZWVKqBsc7co6jmCstnn0gR+Tjcp9c7LIMnC\npKTD5vmXAgMBAAECggEABjWNLl+auL6Ts/0XPdf5Ryy/Nts4YJBZAr29+JY5H4AV\nevsRpYSXesY4yepMqwwIJFdQTiMc0pfsyk0NKF/R/VNY/RYp4L4X4VYhiVka8Enx\nbdHHGGtUU755PG0gMP0x893NE/jB0dGtQ7Lxp5U151IQ78Uh/RSuljHRCVGbBt4P\n2HqgNU72KFLp9ozLOVt+5XGWH25PmKmo4bNneMoDdx9PbzVVzHK8lNF/KfeRy0kT\nEePxCHW1//rmXNHXLi77yD/bZWjXrRkXwL+3VHcm1B/qk4CmFkneFg4rSJ+mHJRb\nHMlDnqUc7Bg3qKawc38JzWdEObhp2/LeIYoEJi95AQKBgQDzCtBuWiFZx45pILir\nrKk76ZjWmp1qLwiM8dAA5ch6L+PKEFWawlUv/HeXjZBFBp2kuSuCUGqUS7K0UyIo\nUfhUYHVnTuuBPUpd/mn61kNYnCvGwI4B9r6miDJLjej31JTX5fwnJ+MqheJVwHck\nWvzg5Dc/c1TsHlGsoyYAu8e9LQKBgQDpWu/GtYYEeFcyZ5j/pAbGwLXzMZ/Pfbty\nrHiriES+pR0unHnhRxVHwvHoHTX/HYxoouYsfw6wcPvzz9MU5gjnzBA5JlWAD2wd\nhy7xKNZZerWXs8sbEFACd4a/gQ2mfYdOeQ1p5MwJyuZc8qF3B41Dw2sIhgmkEvOe\nSvVfxEW0UwKBgF0qDg/fGN2zc1G1K1UTkKPYva+2ARWNBfgRUaymaJz98pGohUgX\nqlQEsUs1BtKO4KseGCGR9ej2w4AARh2ynkCp4RdC11/pQLKbLcDrlVFIPDep5EW4\ncgigOLdhpKYrpQrFrEzOK3RHciVw67rR7hG/KbZ23VzNmn1U5OJvGPfZAoGABSGD\nvinFnZmLyUbv3UcdAwe/uG4x5l0MXxQdvx/K6yo0Pw8fuu1WMXK+4OyrgEWFDdPv\nHbFZgFWrpIvAR2hbb8VT4f3OyXcNWITdal4MgIErNv+0Co9MQxGfu9w5kZyW+gm9\nWsO2HM0CTa7kD/rxhzjnxJM16Q6lnqhlRsrJAZMCgYEAtR6F3Dn9I9L8Zen8MtPE\nMCCDAd2RLz3kQPtf4d4HTJ+vLehybuoOi71PSYkoQIdBwLvpOpJTdS3+GDzO7eG0\nCyIF6adpAmXwufzgsXEmvospY53MqVK91faLISWRHdmlmWnyPEmCtafQrygMqLzc\nnHIDxRpPmXQVXkjrSa5orNU=\n-----END PRIVATE KEY-----\n",
+  "client_email": "ultron-agent@research-lds.iam.gserviceaccount.com",
+  "client_id": "113213957620764710141",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/ultron-agent%40research-lds.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
 
