@@ -28,8 +28,10 @@ Round N target: <evidence gap/objection> — because <evidence>. Score 4×5/2.
 1. Restore the ledger and reports; run the research validator.
 2. Use the next alternating side from state.
 3. Look for the weakest link in the current case: unauthenticated item, missing
-   context/POV, missing source locator, duplicate identity, unsupported score,
-   missing opposite-side comparison, or category with no coverage.
+   context/POV, missing source locator, single-source or single-chain verified
+   item, missing corroboration citations, missing investigation record,
+   duplicate identity, unsupported score, missing opposite-side comparison, or
+   category with no coverage.
 4. Prefer primary texts and original records over repeated summaries.
 5. Record searches and access limits honestly; never invent a finding to make the
    round look productive.

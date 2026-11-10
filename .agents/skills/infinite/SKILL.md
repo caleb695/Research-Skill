@@ -5,7 +5,7 @@ description: >-
   "use this skill", "use infinite", "use the infinite skill", or "/infinite".
   It loads one fixed bundled Book of Mormon evidence-research prompt and runs it
   without requiring task arguments: alternating verified for/against rounds,
-  scoring, cross-side comparison, and two ranked reports on user stop.
+  scoring, cross-side comparison, and three ranked reports on user stop (for, against, comparison) mirrored to Google Docs.
 triggers:
 - use this skill
 - use the infinite skill
@@ -16,7 +16,7 @@ license: MIT
 compatibility: OpenHands Cloud project-skill discovery; canonical resources live in the repository's infinite/ directory.
 metadata:
   author: caleb695
-  version: "1.3.0"
+  version: "1.4.0"
 ---
 
 # Infinite repository launcher
@@ -35,9 +35,12 @@ Before doing any work:
    workspace as `--dir`.
 
 Run only the fixed Book of Mormon research prompt: initialize the research ledger
-if needed, alternate for/against rounds, verify and score every item, and maintain
-the two reports. On an explicit user stop, cease research and compile both final
-reports. Do not accept a replacement task from arguments or an unrelated request.
+if needed, alternate for/against rounds, execute all six coded per-item steps
+(authenticate, context/POV, multiple sources with cited corroboration, counters,
+ranked scores with reasons, extensive investigation), and maintain the three
+reports (for, against, head-to-head comparison) plus their Google Docs mirror. On
+an explicit user stop, cease research and compile all three final reports and sync
+the final Google Docs. Do not accept a replacement task from arguments or an unrelated request.
 When enforcement hooks are installed, the research protocol is deterministic:
 the Stop hook validates the ledger/reports, PreToolUse requires helper-only
 writes, and only a real user message can stop or resume the task.

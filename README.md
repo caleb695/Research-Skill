@@ -23,19 +23,27 @@ Each round alternates **for → against → for → against** and:
 
 1. Checks for a real user stop and restores the durable ledger.
 2. Picks one high-value evidence gap, objection, or weak citation.
-3. Authenticates the candidate against primary/scholarly sources.
-4. Reads full textual/historical context and identifies POV, incentives,
-   dependencies, and missing facts.
-5. Deduplicates by underlying observation; revisions do not count as new items.
-6. Rates credibility, accuracy, relevance, and usefulness with reasons, then
-   computes one overall Evidence Impact Score. Fabricated items score zero;
-   unresolved/disputed provenance is capped and quarantined.
-7. Evaluates the item against the strongest opposing evidence or alternative.
-8. Records searches/access limits, logs the round, compiles both reports, and
-   validates before continuing.
+3. Executes the fixed prompt's six per-item steps, each **enforced in code** by
+   the ledger helper's schema (partial or shallow records are rejected):
+   (1) authenticate with at least three substantive recorded checks;
+   (2) record full textual/historical context, POV, incentives, dependencies,
+   and missing facts; (3) check multiple sources from at least two independent
+   chains and cite at least two distinct pieces of evidence in a corroboration
+   block (biased/discovery sources are `lead-only` and cannot carry an item);
+   (4) evaluate the strongest counters with a substantive analysis;
+   (5) rate credibility, accuracy, relevance, and usefulness with specific
+   reasons, plus one computed overall Evidence Impact Score (fabricated items
+   score zero; unresolved/disputed provenance is capped and quarantined;
+   witnesses are capped — the prompt weighs them less); (6) record the extensive
+   investigation: queries run, sources consulted, leads ruled out, depth.
+4. Deduplicates by underlying observation; revisions do not count as new items.
+5. Evaluates the item against the strongest opposing evidence or alternative and
+   links opposite-side IDs so contradictions render head-to-head.
+6. Records searches/access limits, logs the round, compiles all three reports,
+   syncs the Google Docs mirror, and validates before continuing.
 
 The Bible-as-true assumption is treated as the user's stipulated premise and
-labeled in both reports. The Book of Mormon is a primary source for its contents,
+labeled in all three reports. The Book of Mormon is a primary source for its contents,
 not independent proof of its historicity. Historically documented spiritual
 experiences are handled as evidence of reported experience/belief, not automatic
 public verification of a supernatural cause.
@@ -54,24 +62,64 @@ loop moving.
 
 ## Deliverables and stop behavior
 
-The helper maintains two separate documents:
+The helper maintains three separate documents:
 
 ```text
 research/book-of-mormon-for.md
 research/book-of-mormon-against.md
+research/book-of-mormon-comparison.md
 ```
 
-Each contains overall and within-category claim rankings, category rankings,
-ranked canonical evidence with component ratings, provenance/context/POV checks,
-opposing-evidence evaluations, assumptions, limitations, rejected/quarantined
-leads, search coverage, and original synthesis. Evidence shared by several claims
-is listed once and referenced by ID.
+The for and against reports each contain overall and within-category claim
+rankings, category rankings, ranked canonical evidence with component ratings,
+provenance/context/POV checks, opposing-evidence evaluations, assumptions,
+limitations, rejected/quarantined leads, search coverage, and original synthesis.
+Evidence shared by several claims is listed once and referenced by ID. The
+comparison report is "one document with everything": direct contradictions where
+opposing for/against points are shown head-to-head with both counter-analyses
+and scores, claim and category face-offs, and the full combined register.
 
-Say **`stop`** to end research. The skill then stops searching and compiles both
-final reports from recorded findings. With research enforcement, the user-stop
-hook requests finalization and the built-in validator blocks finishing only until
-the reports are valid; it does not order more research. Say `continue` later to
-resume from the ledger at the next round and side.
+### Google Docs (gws CLI or built-in REST — your choice)
+
+The deliverables are Google Documents, not just local Markdown.
+`infinite/scripts/google_docs.py` creates and syncs three Google Docs (FOR,
+AGAINST, COMPARISON) through the **Google Workspace CLI**
+([github.com/googleworkspace/cli](https://github.com/googleworkspace/cli)) when
+it is installed — or, with **nothing installed at all**, through a built-in
+direct REST transport (Python stdlib) using your Google credentials. Either
+way credentials stay user-owned and out of the chat:
+
+```bash
+# Option A — with a computer, via the gws CLI:
+npm install -g @googleworkspace/cli   # or brew install googleworkspace-cli
+gws auth setup && gws auth login      # creates the Cloud project + OAuth client, logs you in
+python3 infinite/scripts/google_docs.py --dir . setup   # creates the three Docs
+
+# Option B — phone-only / no CLI anywhere (device-code login):
+# create a free "TVs and Limited Input devices" OAuth client in the Google
+# Cloud Console (phone browser works), then:
+python3 infinite/scripts/google_docs.py --dir . login   # prints a URL + code to approve on your phone
+python3 infinite/scripts/google_docs.py --dir . setup
+```
+
+On OpenHands Cloud, store credentials as Settings → Secrets instead:
+`GOOGLE_WORKSPACE_CLI_CLIENT_ID` + `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET` (for
+the device login), or `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` holding the
+output of `gws auth export --unmasked` — the helper materializes secrets into
+a private file automatically (see
+[`infinite/references/google-docs.md`](infinite/references/google-docs.md)).
+Full walkthrough (including all Google Cloud Console links):
+[`infinite/references/google-docs.md`](infinite/references/google-docs.md).
+`compile` auto-syncs whenever a transport is authenticated, and **final
+validation fails until all three Google Docs are synced at the final ledger
+digest** — the run cannot finish on local files alone.
+
+Say **`stop`** to end research. The skill then stops searching, compiles all
+three final reports from recorded findings, and syncs the final Google Docs.
+With research enforcement, the user-stop hook requests finalization and the
+built-in validator blocks finishing only until the reports and Google Docs are
+valid; it does not order more research. Say `continue` later to resume from the
+ledger at the next round and side.
 
 ## Install and use
 
@@ -114,7 +162,8 @@ for the checked Cloud contract and the remaining live-deployment smoke test.
 ```text
 .infinite/state.json     round, profile, next side/target, dry-round count
 .infinite/ledger.jsonl   append-only rounds, evidence revisions, claims, searches
-research/*.md            generated two-report deliverables
+.infinite/gdocs.json     Google Docs receipt: document IDs/URLs + last sync digest
+research/*.md            generated three-report deliverables (+ Google Docs mirror)
 ```
 
 ```bash
@@ -122,21 +171,25 @@ python3 infinite/scripts/infinite_research.py --dir . init
 python3 infinite/scripts/infinite_research.py --dir . status
 python3 infinite/scripts/infinite_research.py --dir . validate
 python3 infinite/scripts/infinite_state.py --dir . status
+python3 infinite/scripts/google_docs.py --dir . setup   # once, after 'login' (device code) or gws auth
+python3 infinite/scripts/google_docs.py --dir . status
 ```
 
 Record formats and the full command sequence are in
 [`infinite/references/evidence-schema.md`](infinite/references/evidence-schema.md).
-The validator checks structure, scoring math, duplicate keys, references,
-alternation, and report freshness. It cannot authenticate history or guarantee
-that prose is fair; the recorded sources and checks are the audit trail.
+The validator checks structure, the six coded prompt steps with their substance
+thresholds, scoring math and caps, duplicate keys, references, alternation,
+report freshness for all three reports, and the Google Docs sync receipt. It
+cannot authenticate history or guarantee that prose is fair; the recorded sources
+and checks are the audit trail.
 
 ## Deterministic enforcement
 
 The Mormon side is not just prompting. The user-owned guard installs Stop,
 PreToolUse, and UserPromptSubmit hooks. The Stop hook has a built-in research
 validator that cannot be removed with `--no-gates`; PreToolUse requires
-helper-only ledger/report writes and blocks premature final reports; only a real
-user message can stop or resume. While active, the agent cannot elect to finish
+helper-only ledger/report writes and blocks premature final reports or premature
+final Google Docs syncs; only a real user message can stop or resume. While active, the agent cannot elect to finish
 or disable enforcement. The user can always override from their own terminal:
 
 ```bash
@@ -170,12 +223,13 @@ Research-Skill/
 ├── infinite/                         canonical self-contained skill
 │   ├── SKILL.md
 │   ├── commands/infinite.md
-│   ├── references/                   fixed-task, research, schema, loop, Cloud, enforcement
-│   ├── scripts/                      ledger/state/guard/hooks/installer
+│   ├── references/                   fixed-task, research, schema, loop, Google Docs, Cloud, enforcement
+│   ├── scripts/                      ledger/state/guard/google-docs/hooks/installer
 │   └── assets/
 ├── tests/smoke.sh                    generic enforcement/install checks
 ├── tests/openhands_compat.py         loader + hook contract checks
 ├── tests/test_research.py            research mechanics + Cloud relocation
+├── tests/test_gdocs.py               Google Docs converter/credential checks (offline)
 └── SKILL.md                          repository-level pointer
 ```
 
@@ -185,6 +239,7 @@ Research-Skill/
 bash tests/smoke.sh
 python3 tests/openhands_compat.py
 python3 tests/test_research.py
+python3 tests/test_gdocs.py
 ```
 
 ## License
