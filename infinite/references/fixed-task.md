@@ -25,7 +25,7 @@ Note that people can lie and people can be wrong so don’t take everything at f
 - Don’t repeat pieces of evidence. 
 - Use many reliable sources (as many reliable sources as you can find) and do not use unreliable sources such as Wikipedia, Reddit, quora, etc. and try not to use biased sources, only to find a claim to research for evidence but those are NOT sources of evidence.
 - Once you find evidence for the Book of Mormon, look for evidence against it, then back to evidence for it and repeat. 
-- Create two separate documents, one for it, and one against it.
+- Create three separate documents: one for, one against, and one comparing both.
 - Evaluate each piece of evidence against evidence on the other side.
 - For evidence use the bible and Book of Mormon (assuming the bible is true) like things in the bible that would make sense if the BoM was true, witnesses (weighed less!), archeological evidence, things that wouldn’t make sense if the Book of Mormon wasn’t true, the likelihood of something, events from throughout history that are involved with the Mormon church, and other categories (any other evidence, these are just examples). And use all evidence from throughout history. Even things such as spiritual experiences (but things known historically not like a random unreliable person sharing a story)
 - If you can’t find more evidence, go deeper and don’t just rely on things that other people have found, also try to find/uncover things yourself that haven’t been found or considered largely yet.
@@ -44,7 +44,7 @@ Note that people can lie and people can be wrong so don’t take everything at f
   reports; still check text, translation, context, and interpretation.
 - The rest of this skill package defines how to execute the fixed prompt:
   alternating for/against rounds, authentication, context/POV, one overall score,
-  deduplication, cross-side evaluation, durable ledger, and two ranked reports on
+  deduplication, cross-side evaluation, durable ledger, and three ranked reports on
   stop. It does not authorize a different task.
 - The research side is backed by deterministic enforcement when hooks are
   installed: a built-in Stop validator, helper-only ledger/report writes, and

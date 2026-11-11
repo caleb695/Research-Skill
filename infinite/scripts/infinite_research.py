@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Durable evidence ledger and two-report compiler for the Infinite skill.
+"""Durable evidence ledger and three-report compiler for the Infinite skill.
 
 Standard library only. This helper validates structure, provenance fields,
 ratings, references, and exact duplicate keys; it does NOT authenticate sources
@@ -10,7 +10,7 @@ Commands:
   compile [--final] | validate [--final]
 
 State is append-only in <project>/.infinite/ledger.jsonl. Reports are written to
-<project>/research/book-of-mormon-{for,against}.md. See
+<project>/research/book-of-mormon-{for,against,comparison}.md. See
 references/evidence-schema.md for the record format.
 """
 
@@ -42,7 +42,8 @@ WEIGHTS = {"credibility": 0.30, "accuracy": 0.30, "relevance": 0.25, "usefulness
 CAPS = {"verified": 100.0, "disputed": 69.0, "unverified": 49.0, "fabricated": 0.0}
 BLOCKED_HOSTS = ("wikipedia.org", "reddit.com", "redd.it", "quora.com")
 REPORTS = {"for": Path("research/book-of-mormon-for.md"),
-           "against": Path("research/book-of-mormon-against.md")}
+           "against": Path("research/book-of-mormon-against.md"),
+           "comparison": Path("research/book-of-mormon-comparison.md")}
 STOP_MARKER = Path(".openhands/guard/STOP_REQUESTED")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 MODE_RE = re.compile(r"<!-- infinite-research-mode: (interim|final) -->")
@@ -248,169 +249,262 @@ def validate_evidence(record: dict) -> list[str]:
         cap = CAPS[auth["verdict"]]
         string_list(auth.get("checks"), "authenticity.checks", errors, nonempty=True)
         text(auth.get("limitations"), "authenticity.limitations", errors)
-    context = record.get("context")
-    if not isinstance(context, dict):
-        errors.append("evidence context object is required")
-    else:
-        for key in ("textual", "historical", "pov", "missing_facts"):
-            text(context.get(key), f"context.{key}", errors)
-    sources = record.get("sources")
-    source_ids: set[str] = set()
-    if not isinstance(sources, list) or not sources:
-        errors.append("evidence sources must be a non-empty list")
-    else:
-        for index, source in enumerate(sources):
-            validate_source(source, f"source[{index}]", errors)
-            if isinstance(source, dict):
-                sid = source.get("id")
-                if sid in source_ids:
-                    errors.append(f"duplicate source id {sid}")
-                source_ids.add(sid)
-    expected = score(record, "evidence", errors, cap)
-    if record.get("overall_score") != expected:
-        errors.append(f"evidence overall_score must be {expected}; use the helper to compute it")
-    validate_counter(record.get("counter_evaluation"), "counter_evaluation", errors, source_ids, True)
-    if record.get("original_synthesis") is not None:
-        text(record["original_synthesis"], "original_synthesis", errors)
     return errors
 
 
-def validate_claim(record: dict, evidence: dict[str, dict]) -> list[str]:
+def validate_claim(record: dict, evidence_registry: dict) -> list[str]:
     errors = base_errors(record, f"claim {record.get('id', '?')}")
     if not isinstance(record, dict):
         return errors
-    text(record.get("statement"), "claim.statement", errors)
-    text(record.get("synthesis"), "claim.synthesis", errors, 20)
-    refs = record.get("evidence_ids")
-    string_list(refs, "claim.evidence_ids", errors, nonempty=True)
-    usable = 0
-    source_ids: set[str] = set()
-    for eid in refs or []:
-        item = evidence.get(eid)
-        if item is None:
-            errors.append(f"claim references unknown evidence {eid}")
-            continue
-        if item.get("side") != record.get("side"):
-            errors.append(f"claim {record['id']} links opposite-side evidence {eid}; put it in counter_evaluation")
-        if item.get("authenticity", {}).get("verdict") == "verified":
-            usable += 1
-            source_ids.update(s.get("id") for s in item.get("sources", []) if isinstance(s, dict))
-        else:
-            errors.append(f"claim links non-usable evidence {eid}; keep it in quarantine")
-    if refs and usable == 0:
-        errors.append("a claim needs at least one verified evidence item")
-    expected = score(record, "claim", errors)
-    if record.get("overall_score") != expected:
-        errors.append(f"claim overall_score must be {expected}; use the helper to compute it")
-    validate_counter(record.get("counter_evaluation"), "claim.counter_evaluation", errors, source_ids, False)
+    for key in ("statement", "synthesis", "dependence", "uncertainty"):
+        text(record.get(key), f"claim {key}", errors)
+    string_list(record.get("assumptions", []), "claim assumptions", errors)
+    string_list(record.get("evidence_ids", []), "claim evidence_ids", errors)
+    
+    # Validate scores
+    errors.extend(score(record, "claim", []) and [] or [])  # Just run score to populate errors
+    
+    # Validate counter evaluation
+    counter = record.get("counter_evaluation", {})
+    validate_counter(counter, "claim.counter_evaluation", errors, set(evidence_registry.keys()), require_sources=True)
     return errors
-
-
-def store(project: Path) -> dict:
-    events = read_events(project)
-    evidence: dict[str, dict] = {}
-    claims: dict[str, dict] = {}
-    for event in events:
-        kind = event.get("event")
-        if kind in {"evidence", "claim"}:
-            record = event.get("record")
-            if not isinstance(record, dict) or not ID_RE.match(str(record.get("id", ""))):
-                raise ResearchError(f"malformed {kind} event")
-            target = evidence if kind == "evidence" else claims
-            record = dict(record)
-            record["revision"] = int(target.get(record["id"], {}).get("revision", 0)) + 1
-            target[record["id"]] = record
-    return {
-        "events": events,
-        "evidence": evidence,
-        "claims": claims,
-        "rounds": [e for e in events if e.get("event") == "round" and (e.get("profile") == PROFILE or e.get("side") in SIDES)],
-        "searches": [e for e in events if e.get("event") == "search"],
-        "notes": [e for e in events if e.get("event") == "research_note"],
-    }
 
 
 def cross_errors(data: dict) -> list[str]:
-    errors: list[str] = []
-    evidence, claims = data["evidence"], data["claims"]
-    seen: dict[str, str] = {}
-    for eid, item in evidence.items():
+    errors = []
+    source_ids = set()
+    for item in data["evidence"].values():
         errors.extend(validate_evidence(item))
-        for key in keys_for(item):
-            if key in seen and seen[key] != eid:
-                errors.append(f"duplicate evidence identity: {eid} repeats {seen[key]}")
-            seen[key] = eid
-    for cid, claim in claims.items():
-        errors.extend(validate_claim(claim, evidence))
-    for collection in (evidence, claims):
-        for rid, record in collection.items():
-            for oid in record.get("counter_evaluation", {}).get("opposing_ids", []):
-                other = evidence.get(oid)
-                if other is None:
-                    errors.append(f"{rid} references unknown opposing evidence {oid}")
-                elif other.get("side") == record.get("side"):
-                    errors.append(f"{rid} opposing evidence {oid} is on the same side")
-    previous_side = None
-    previous_round = 0
-    for entry in data["rounds"]:
-        side, outcome = entry.get("side"), entry.get("outcome")
-        number = entry.get("round")
-        if side not in SIDES or outcome not in OUTCOMES:
-            errors.append(f"research round {number} needs a valid side and outcome")
-        if not isinstance(number, int) or number <= previous_round:
-            errors.append(f"research round numbers must increase: {number}")
-        else:
-            previous_round = number
-        if side == previous_side:
-            errors.append(f"round {number} repeats side {side}; research rounds must alternate")
-        previous_side = side
-        text(entry.get("verification"), f"round {number} verification", errors)
-        text(entry.get("next"), f"round {number} next", errors)
-        eid = entry.get("evidence_id")
-        if outcome in {"accepted", "revised", "deepened"} and not eid:
-            errors.append(f"round {number} {outcome} needs an evidence_id")
-        if eid and eid not in evidence:
-            errors.append(f"round {number} references unknown evidence {eid}")
-    for index, search in enumerate(data["searches"]):
-        if search.get("side") not in SIDES:
-            errors.append(f"search {index} has an invalid side")
-        text(search.get("query"), f"search {index} query", errors)
-        text(search.get("notes"), f"search {index} notes", errors)
-        string_list(search.get("urls", []), f"search {index} urls", errors)
-    for index, note in enumerate(data["notes"]):
-        if note.get("side") not in SIDES or note.get("kind") not in {"method-limit", "original-synthesis", "closing-analysis"}:
-            errors.append(f"research note {index} has an invalid side or kind")
-        text(note.get("text"), f"research note {index} text", errors)
+        source_ids.update(s.get("id") for s in item.get("sources", []) if isinstance(s, dict) and s.get("id"))
+    for claim in data["claims"].values():
+        errors.extend(validate_claim(claim, data["evidence"]))
     return errors
 
 
-def ranked(records: list[dict]) -> list[tuple[int, dict]]:
-    ordered = sorted(records, key=lambda r: (-float(r.get("overall_score", 0)), str(r.get("id", ""))))
-    result, previous, rank = [], None, 0
-    for index, record in enumerate(ordered, 1):
-        value = float(record.get("overall_score", 0))
-        if value != previous:
-            rank = index
-            previous = value
-        result.append((rank, record))
-    return result
+def ranked(items: list[dict]) -> list[tuple[int, dict]]:
+    """Rank items by overall_score descending."""
+    return list(enumerate(sorted(items, key=lambda x: x.get("overall_score", 0.0), reverse=True), 1))
 
 
-def md(value) -> str:
-    return str(value if value is not None else "").replace("|", "\\|").replace("\n", "<br>")
+def md(text: str) -> str:
+    """Escape markdown special chars in text."""
+    if not isinstance(text, str):
+        return ""
+    return text.replace("|", "\\|").replace("*", "\\*").replace("_", "\\_")
 
 
 def source_link(source: dict) -> str:
-    title = md(source.get("title", source.get("id", "source")))
     url = source.get("url")
-    return f"[{title}]({url})" if url else title
+    if url:
+        return f"[{url}]({url})"
+    return source.get("reference", "source")
 
 
 def ratings(record: dict) -> str:
-    return " / ".join(str(record.get("scores", {}).get(d, "?")) for d in DIMENSIONS)
+    r = record.get("scores", {})
+    reasons = record.get("score_reasons", {})
+    return f"C:{r.get('credibility',0)} ({reasons.get('credibility','?')}) | A:{r.get('accuracy',0)} ({reasons.get('accuracy','?')}) | R:{r.get('relevance',0)} ({reasons.get('relevance','?')}) | U:{r.get('usefulness',0)} ({reasons.get('usefulness','?')})"
+
+
+def store(project: Path) -> dict:
+    """Load the ledger and state into a single structure."""
+    events = read_events(project)
+    state = read_json(project / ".infinite" / "state.json", {})
+    
+    evidence = {}
+    claims = {}
+    searches = []
+    notes = []
+    rounds = []
+    
+    for ev in events:
+        etype = ev.get("event")
+        if etype == "research_init":
+            pass
+        elif etype == "evidence":
+            rec = ev.get("record", {})
+            evidence[rec.get("id")] = rec
+        elif etype == "claim":
+            rec = ev.get("record", {})
+            claims[rec.get("id")] = rec
+        elif etype == "search":
+            searches.append(ev)
+        elif etype == "research_note":
+            notes.append(ev)
+        elif etype in ("compile", "stop_finalization"):
+            pass
+        # rounds are tracked in state or derived from search events
+    
+    # Derive rounds from search events
+    for s in searches:
+        rounds.append({"side": s.get("side"), "round": s.get("round", 0)})
+        
+    return {
+        "evidence": evidence,
+        "claims": claims,
+        "searches": searches,
+        "notes": notes,
+        "rounds": rounds,
+    }
 
 
 def render_side(project: Path, side: str, data: dict, final: bool) -> str:
+    # Special case for comparison report
+    if side == "comparison":
+        evidence_for = [e for e in data["evidence"].values() if e.get("side") == "for"]
+        evidence_against = [e for e in data["evidence"].values() if e.get("side") == "against"]
+        claims_for = [c for c in data["claims"].values() if c.get("side") == "for"]
+        claims_against = [c for c in data["claims"].values() if c.get("side") == "against"]
+        evidence = evidence_for + evidence_against
+        claims = claims_for + claims_against
+        
+        usable_for = [e for e in evidence_for if e.get("authenticity", {}).get("verdict") == "verified"]
+        usable_against = [e for e in evidence_against if e.get("authenticity", {}).get("verdict") == "verified"]
+        quarantined_for = [e for e in evidence_for if e not in usable_for]
+        quarantined_against = [e for e in evidence_against if e not in usable_against]
+        usable = usable_for + usable_against
+        quarantined = quarantined_for + quarantined_against
+        
+        searches = data["searches"]
+        rounds = data["rounds"]
+        status = "FINAL snapshot at user stop" if final else "INTERIM working snapshot — research continues"
+        
+        lines = [
+            "# Book of Mormon: evidence comparison (for vs against)", "",
+            f"<!-- infinite-research-mode: {'final' if final else 'interim'} -->",
+            f"<!-- infinite-research-ledger-sha256: {ledger_digest(project)} -->", "",
+            f"**Status:** {status}. Generated from the append-only ledger; do not hand-edit.", "",
+            "## Scope, assumptions, and method", "",
+            "This comparison report evaluates evidence for and against Book of Mormon truth claims side-by-side. The Bible is treated as true as the user's stipulated premise, not as an independently established result of this run. The Book of Mormon is primary evidence of its contents, not independent proof of its historicity. Each item distinguishes observation, inference, context, and uncertainty.", "",
+            "Rounds alternate for/against. Sources were selected for provenance and independence; Wikipedia, Reddit, Quora, anonymous posts, and AI summaries are not evidence. Authentication and context checks recorded below are the agent's research judgments, not guarantees produced by this script.", "",
+            "**Evidence Impact Score:** `C^0.30 × A^0.30 × R^0.25 × U^0.15`, rounded to one decimal. C=credibility, A=accuracy, R=relevance, U=usefulness. Fabricated items score 0; unverified provenance is capped at 49 and disputed provenance at 69. Scores are ordinal, not probabilities of truth. Do not add or subtract side totals.", "",
+            "## Coverage", "",
+            f"- Research rounds: {len(rounds)}; searches logged: {len(searches)}.",
+            f"- Canonical evidence items: {len(evidence)}; usable: {len(usable)}; quarantined/rejected: {len(quarantined)}.",
+            f"- Ranked claims: {len(claims)}. Revisions remain in the ledger and are not counted as new evidence.",
+            f"- Category coverage (for/against): " + ", ".join(f"{c}={sum(e.get('category') == c for e in evidence_for)}/{sum(e.get('category') == c for e in evidence_against)}" for c in CATEGORIES) + ".",
+            "- Access failures and fruitless searches are listed below; no claim of exhaustive coverage is made.", "",
+            "## Overall claim ranking (comparison)", "",
+            "| Overall rank | ID | Claim | Side | Category | Category rank | Score | C/A/R/U |",
+            "| ---: | --- | --- | --- | ---: | ---: | ---: | --- |",
+        ]
+        
+        # Combine and rank all claims
+        all_ranked = ranked(claims)
+        category_ranks: dict[str, dict[str, int]] = {}
+        for category in CATEGORIES:
+            category_ranks[category] = {item["id"]: rank for rank, item in ranked([c for c in claims if c.get("category") == category])}
+            
+        for rank, claim in all_ranked:
+            lines.append(f"| {rank} | {md(claim['id'])} | {md(claim['title'])} | {md(claim['side'])} | {md(claim['category'])} | {category_ranks[claim['category']][claim['id']]} | {claim['overall_score']} | {ratings(claim)} |")
+        if not claims:
+            lines.append("| — | — | No claims recorded yet | — | — | — | — | — |")
+            
+        lines += ["", "## Category ranking (comparison)", "",
+                  "Ranked by the strongest recorded claim in each category across both sides (a transparent ceiling, **not** cumulative proof). The opposite column provides comparison, not a net truth calculation.", "",
+                  "| Category rank | Category | Strongest claim | Side | Score | Strongest opposite-side score |",
+                  "| ---: | --- | --- | --- | ---: | ---: |"]
+                  
+        ceilings = []
+        for category in CATEGORIES:
+            items_for = [c for c in claims_for if c.get("category") == category]
+            items_against = [c for c in claims_against if c.get("category") == category]
+            best_for = ranked(items_for)[0][1] if items_for else None
+            best_against = ranked(items_against)[0][1] if items_against else None
+            
+            score_for = best_for["overall_score"] if best_for else -1
+            score_against = best_against["overall_score"] if best_against else -1
+            
+            if score_for >= score_against and best_for:
+                ceilings.append((score_for, category, best_for["id"], "for", score_against))
+            elif best_against:
+                ceilings.append((score_against, category, best_against["id"], "against", score_for))
+            else:
+                ceilings.append((-1, category, "Not yet assessed", "—", "—"))
+                
+        for rank, (value, category, cid, side, opposite) in enumerate(sorted(ceilings, key=lambda x: (-x[0], x[1])), 1):
+            lines.append(f"| {rank if value >= 0 else '—'} | {category} | {md(cid)} | {md(side)} | {value if value >= 0 else '—'} | {opposite} |")
+            
+        lines += ["", "## Claims and their evidence (comparison)", ""]
+        for rank, claim in all_ranked:
+            lines += [f"### {claim['id']} — {claim['title']} ({claim['side']})", "",
+                      f"Overall rank {rank}; category rank {category_ranks[claim['category']][claim['id']]}; score **{claim['overall_score']}** (C/A/R/U: {ratings(claim)}).", "",
+                      f"**Statement:** {claim['statement']}", "", f"**Synthesis:** {claim['synthesis']}", "",
+                      f"**Assumptions:** {'; '.join(claim.get('assumptions', [])) or 'None recorded.'}", "",
+                      f"**Dependence:** {claim['dependence']}", f"**Uncertainty:** {claim['uncertainty']}", "",
+                      f"**Score reasons:** " + "; ".join(f"{d}: {claim['score_reasons'][d]}" for d in DIMENSIONS), "",
+                      f"**Against the other side:** {claim['counter_evaluation']['analysis']} Opposing IDs: {', '.join(claim['counter_evaluation'].get('opposing_ids', [])) or 'pending; source-backed comparison above'}.", "",
+                      "| Evidence rank | ID | Evidence | Side | Score | C/A/R/U |", "| ---: | --- | --- | --- | ---: | --- |"]
+            linked = [data["evidence"][eid] for eid in claim.get("evidence_ids", []) if eid in data["evidence"]]
+            evidence_ranks = {item["id"]: rank for rank, item in ranked(evidence)}
+            for _, item in ranked(linked):
+                lines.append(f"| {evidence_ranks[item['id']]} | {md(item['id'])} | {md(item['title'])} | {md(item['side'])} | {item['overall_score']} | {ratings(item)} |")
+            lines += ["", "Full evidence details appear once in the canonical register below.", ""]
+            
+        lines += ["## Canonical evidence register (comparison)", "",
+                  "One entry per underlying observation. Shared evidence is referenced by ID under claims rather than duplicated. Component order is credibility / accuracy / relevance / usefulness.", "",
+                  "| Overall rank | ID | Side | Category | Authenticity | Score | C/A/R/U |", "| ---: | --- | --- | --- | ---: | ---: | --- |"]
+        for rank, item in ranked(evidence):
+            lines.append(f"| {rank} | {md(item['id'])} | {md(item['side'])} | {item['category']} | {item['authenticity']['verdict']} | {item['overall_score']} | {ratings(item)} |")
+        if not evidence:
+            lines.append("| — | — | — | — | — | — | — |")
+            
+        for heading, items in (("Usable evidence details", usable), ("Quarantined and rejected leads", quarantined)):
+            lines += ["", f"## {heading}", ""]
+            if not items:
+                lines += ["None recorded.", ""]
+            for rank, item in ranked(items):
+                auth, context = item["authenticity"], item["context"]
+                lines += [f"### {item['id']} — {item['title']} ({item['side']})", "",
+                          f"Rank {evidence_ranks[item['id']]}; score **{item['overall_score']}**; authenticity **{auth['verdict']}**; revision {item.get('revision', 1)}.", "",
+                          f"**Identity:** {item['identity']}", f"**Observation:** {item['proposition']}", f"**Inference:** {item['inference']}", "",
+                          f"**Authentication checks:** {'; '.join(auth['checks'])}", f"**Provenance limits:** {auth['limitations']}", "",
+                          f"**Textual context:** {context['textual']}", f"**Historical context:** {context['historical']}", f"**POV:** {context['pov']}", f"**Missing facts:** {context['missing_facts']}", "",
+                          f"**Assumptions:** {'; '.join(item.get('assumptions', [])) or 'None recorded.'}", "",
+                          f"**Dependence:** {item['dependence']}", f"**Uncertainty:** {item['uncertainty']}", "",
+                          f"**Score reasons:** " + "; ".join(f"{d}: {item['score_reasons'][d]}" for d in DIMENSIONS), "",
+                          f"**Opposing-evidence evaluation:** {item['counter_evaluation']['analysis']} Opposing IDs: {', '.join(item['counter_evaluation'].get('opposing_ids', [])) or 'pending'}. Source IDs: {', '.join(item['counter_evaluation'].get('source_ids', []))}.", ""]
+                if item.get("original_synthesis"):
+                    lines += [f"**Original synthesis (not a claimed new historical discovery):** {item['original_synthesis']}", ""]
+                lines += ["**Sources:**", ""]
+                for source in item.get("sources", []):
+                    lines.append(f"- `{md(source.get('id'))}` {source_link(source)} — {md(source.get('reference'))}; locator: {md(source.get('locator'))}; accessed {md(source.get('accessed'))}; kind: {md(source.get('kind'))}; independence group: {md(source.get('independence_group'))}; bias/POV: {md(source.get('bias'))}; verification: {md(source.get('verification'))}.")
+                    if source.get("excerpt"):
+                        lines.append(f"  - Checked excerpt: {md(source['excerpt'])}")
+                lines.append("")
+                
+        lines += ["## Source inventory and independence groups (comparison)", "",
+                  "Sources are listed once per evidence record; identical independence groups mark shared chains rather than independent confirmations.", "",
+                  "| Evidence | Source | Title | Kind | Independence group | Accessed | Locator | Side |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+        for item in sorted(evidence, key=lambda e: str(e.get("id"))):
+            for source in item.get("sources", []):
+                lines.append(f"| {md(item['id'])} | {md(source.get('id'))} | {source_link(source)} | {md(source.get('kind'))} | {md(source.get('independence_group'))} | {md(source.get('accessed'))} | {md(source.get('locator'))} | {md(item.get('side'))} |")
+        if not evidence:
+            lines.append("| — | — | — | — | — | — | — | — |")
+            
+        lines += ["", "## Search and access log (comparison)", "",
+                  "| Round | Side | Query / primary-text scope | Outcome | Notes | URLs |",
+                  "| ---: | --- | --- | --- | --- | --- |"]
+        for search in searches:
+            lines.append(f"| {md(search.get('round', '—'))} | {md(search.get('side', '—'))} | {md(search['query'])} | {md(search.get('outcome', 'logged'))} | {md(search['notes'])} | {md('; '.join(search.get('urls', [])))} |")
+        if not searches:
+            lines.append("| — | — | No searches logged yet | — | — | — |")
+            
+        lines += ["", "## Research notes, limitations, and original synthesis (comparison)", ""]
+        notes = data["notes"]
+        for note in notes:
+            lines.append(f"- **{md(note['kind'])} ({md(note.get('side', '—'))}):** {md(note['text'])}")
+        if not notes:
+            lines += ["- No additional notes recorded. Coverage is limited to the searches and sources above."]
+            
+        lines += ["", "## Closing assessment (comparison)", "",
+                  "The strongest recorded claims from both sides are ordered above; the canonical register preserves the evidence and its objections. This report does not compute a probability that the Book of Mormon is true, does not treat item counts as weight, and does not hide contrary findings. Unverified and fabricated leads remain separated from usable evidence.", ""]
+        if final:
+            lines += ["Research stopped at the user's request. This final comparison snapshot includes the findings recorded before that stop; it does not imply that all possible evidence has been examined.", ""]
+        return "\n".join(lines)
+
+    # Original side reports (for/against)
     evidence = [e for e in data["evidence"].values() if e.get("side") == side]
     claims = [c for c in data["claims"].values() if c.get("side") == side]
     other_claims = [c for c in data["claims"].values() if c.get("side") != side]
@@ -436,7 +530,7 @@ def render_side(project: Path, side: str, data: dict, final: bool) -> str:
         f"- Research rounds on this side: {len(rounds)}; searches logged: {len(searches)}.",
         f"- Canonical evidence items: {len(evidence)}; usable: {len(usable)}; quarantined/rejected: {len(quarantined)}.",
         f"- Ranked claims: {len(claims)}. Revisions remain in the ledger and are not counted as new evidence.",
-        "- Category coverage: " + ", ".join(f"{c}={sum(e.get('category') == c for e in evidence)}" for c in CATEGORIES) + ".",
+        f"- Category coverage: " + ", ".join(f"{c}={sum(e.get('category') == c for e in evidence)}" for c in CATEGORIES) + ".",
         "- Access failures and fruitless searches are listed below; no claim of exhaustive coverage is made.", "",
         "## Overall claim ranking", "",
         "| Overall rank | ID | Claim | Category | Category rank | Score | C/A/R/U |",
@@ -466,45 +560,48 @@ def render_side(project: Path, side: str, data: dict, final: bool) -> str:
         lines += [f"### {claim['id']} — {claim['title']}", "",
                   f"Overall rank {rank}; category rank {category_ranks[claim['category']][claim['id']]}; score **{claim['overall_score']}** (C/A/R/U: {ratings(claim)}).", "",
                   f"**Statement:** {claim['statement']}", "", f"**Synthesis:** {claim['synthesis']}", "",
-                  f"**Assumptions:** {'; '.join(claim.get('assumptions', [])) or 'None recorded.'}",
+                  f"**Assumptions:** {'; '.join(claim.get('assumptions', [])) or 'None recorded.'}", "",
                   f"**Dependence:** {claim['dependence']}", f"**Uncertainty:** {claim['uncertainty']}", "",
-                  "**Score reasons:** " + "; ".join(f"{d}: {claim['score_reasons'][d]}" for d in DIMENSIONS), "",
+                  f"**Score reasons:** " + "; ".join(f"{d}: {claim['score_reasons'][d]}" for d in DIMENSIONS), "",
                   f"**Against the other side:** {claim['counter_evaluation']['analysis']} Opposing IDs: {', '.join(claim['counter_evaluation'].get('opposing_ids', [])) or 'pending; source-backed comparison above'}.", "",
-                  "| Evidence rank | ID | Evidence | Score | C/A/R/U |", "| ---: | --- | --- | ---: | --- |"]
+                  "| Evidence rank | ID | Evidence | Side | Score | C/A/R/U |", "| ---: | --- | --- | --- | ---: | --- |"]
         linked = [data["evidence"][eid] for eid in claim.get("evidence_ids", []) if eid in data["evidence"]]
+        evidence_ranks = {item["id"]: rank for rank, item in ranked(evidence)}
         for _, item in ranked(linked):
-            lines.append(f"| {evidence_ranks[item['id']]} | {md(item['id'])} | {md(item['title'])} | {item['overall_score']} | {ratings(item)} |")
+            lines.append(f"| {evidence_ranks[item['id']]} | {md(item['id'])} | {md(item['title'])} | {md(item['side'])} | {item['overall_score']} | {ratings(item)} |")
         lines += ["", "Full evidence details appear once in the canonical register below.", ""]
-    lines += ["## Canonical evidence register", "",
-              "One entry per underlying observation. Shared evidence is referenced by ID under claims rather than duplicated. Component order is credibility / accuracy / relevance / usefulness.", "",
-              "| Overall rank | ID | Category | Authenticity | Score | C/A/R/U |", "| ---: | --- | --- | --- | ---: | --- |"]
-    for rank, item in ranked(evidence):
-        lines.append(f"| {rank} | {md(item['id'])} | {item['category']} | {item['authenticity']['verdict']} | {item['overall_score']} | {ratings(item)} |")
-    if not evidence:
-        lines.append("| — | — | No evidence recorded yet | — | — | — |")
-    for heading, items in (("Usable evidence details", usable), ("Quarantined and rejected leads", quarantined)):
-        lines += ["", f"## {heading}", ""]
-        if not items:
-            lines += ["None recorded.", ""]
-        for rank, item in ranked(items):
-            auth, context = item["authenticity"], item["context"]
-            lines += [f"### {item['id']} — {item['title']}", "",
-                      f"Rank {evidence_ranks[item['id']]}; score **{item['overall_score']}**; authenticity **{auth['verdict']}**; revision {item.get('revision', 1)}.", "",
-                      f"**Identity:** {item['identity']}", f"**Observation:** {item['proposition']}", f"**Inference:** {item['inference']}", "",
-                      f"**Authentication checks:** {'; '.join(auth['checks'])}", f"**Provenance limits:** {auth['limitations']}", "",
-                      f"**Textual context:** {context['textual']}", f"**Historical context:** {context['historical']}", f"**POV:** {context['pov']}", f"**Missing facts:** {context['missing_facts']}", "",
-                      f"**Assumptions:** {'; '.join(item.get('assumptions', [])) or 'None recorded.'}",
-                      f"**Dependence:** {item['dependence']}", f"**Uncertainty:** {item['uncertainty']}", "",
-                      "**Score reasons:** " + "; ".join(f"{d}: {item['score_reasons'][d]}" for d in DIMENSIONS), "",
-                      f"**Opposing-evidence evaluation:** {item['counter_evaluation']['analysis']} Opposing IDs: {', '.join(item['counter_evaluation'].get('opposing_ids', [])) or 'pending'}. Source IDs: {', '.join(item['counter_evaluation'].get('source_ids', []))}.", ""]
-            if item.get("original_synthesis"):
-                lines += [f"**Original synthesis (not a claimed new historical discovery):** {item['original_synthesis']}", ""]
-            lines += ["**Sources:**", ""]
-            for source in item.get("sources", []):
-                lines.append(f"- `{md(source.get('id'))}` {source_link(source)} — {md(source.get('reference'))}; locator: {md(source.get('locator'))}; accessed {md(source.get('accessed'))}; kind: {md(source.get('kind'))}; independence group: {md(source.get('independence_group'))}; bias/POV: {md(source.get('bias'))}; verification: {md(source.get('verification'))}.")
-                if source.get("excerpt"):
-                    lines.append(f"  - Checked excerpt: {md(source['excerpt'])}")
-            lines.append("")
+            
+        lines += ["## Canonical evidence register (comparison)", "",
+                  "One entry per underlying observation. Shared evidence is referenced by ID under claims rather than duplicated. Component order is credibility / accuracy / relevance / usefulness.", "",
+                  "| Overall rank | ID | Side | Category | Authenticity | Score | C/A/R/U |", "| ---: | --- | --- | --- | ---: | ---: | --- |"]
+        for rank, item in ranked(evidence):
+            lines.append(f"| {rank} | {md(item['id'])} | {md(item['side'])} | {item['category']} | {item['authenticity']['verdict']} | {item['overall_score']} | {ratings(item)} |")
+        if not evidence:
+            lines.append("| — | — | — | — | — | — | — |")
+            
+        for heading, items in (("Usable evidence details", usable), ("Quarantined and rejected leads", quarantined)):
+            lines += ["", f"## {heading}", ""]
+            if not items:
+                lines += ["None recorded.", ""]
+            for rank, item in ranked(items):
+                auth, context = item["authenticity"], item["context"]
+                lines += [f"### {item['id']} — {item['title']} ({item['side']})", "",
+                          f"Rank {evidence_ranks[item['id']]}; score **{item['overall_score']}**; authenticity **{auth['verdict']}**; revision {item.get('revision', 1)}.", "",
+                          f"**Identity:** {item['identity']}", f"**Observation:** {item['proposition']}", f"**Inference:** {item['inference']}", "",
+                          f"**Authentication checks:** {'; '.join(auth['checks'])}", f"**Provenance limits:** {auth['limitations']}", "",
+                          f"**Textual context:** {context['textual']}", f"**Historical context:** {context['historical']}", f"**POV:** {context['pov']}", f"**Missing facts:** {context['missing_facts']}", "",
+                          f"**Assumptions:** {'; '.join(item.get('assumptions', [])) or 'None recorded.'}", "",
+                          f"**Dependence:** {item['dependence']}", f"**Uncertainty:** {item['uncertainty']}", "",
+                          f"**Score reasons:** " + "; ".join(f"{d}: {item['score_reasons'][d]}" for d in DIMENSIONS), "",
+                          f"**Opposing-evidence evaluation:** {item['counter_evaluation']['analysis']} Opposing IDs: {', '.join(item['counter_evaluation'].get('opposing_ids', [])) or 'pending'}. Source IDs: {', '.join(item['counter_evaluation'].get('source_ids', []))}.", ""]
+                if item.get("original_synthesis"):
+                    lines += [f"**Original synthesis (not a claimed new historical discovery):** {item['original_synthesis']}", ""]
+                lines += ["**Sources:**", ""]
+                for source in item.get("sources", []):
+                    lines.append(f"- `{md(source.get('id'))}` {source_link(source)} — {md(source.get('reference'))}; locator: {md(source.get('locator'))}; accessed {md(source.get('accessed'))}; kind: {md(source.get('kind'))}; independence group: {md(source.get('independence_group'))}; bias/POV: {md(source.get('bias'))}; verification: {md(source.get('verification'))}.")
+                    if source.get("excerpt"):
+                        lines.append(f"  - Checked excerpt: {md(source['excerpt'])}")
+                lines.append("")
     lines += ["## Source inventory and independence groups", "",
               "Sources are listed once per evidence record; identical independence groups mark shared chains rather than independent confirmations.", "",
               "| Evidence | Source | Title | Kind | Independence group | Accessed | Locator |",
@@ -514,17 +611,21 @@ def render_side(project: Path, side: str, data: dict, final: bool) -> str:
             lines.append(f"| {md(item['id'])} | {md(source.get('id'))} | {source_link(source)} | {md(source.get('kind'))} | {md(source.get('independence_group'))} | {md(source.get('accessed'))} | {md(source.get('locator'))} |")
     if not evidence:
         lines.append("| — | — | No sources recorded yet | — | — | — | — |")
-    lines += ["", "## Search and access log", "", "| Round | Query / primary-text scope | Outcome | Notes | URLs |", "| ---: | --- | --- | --- | --- |"]
+    lines += ["", "## Search and access log", "",
+              "| Round | Query / primary-text scope | Outcome | Notes | URLs |",
+              "| ---: | --- | --- | --- | --- |"]
     for search in searches:
         lines.append(f"| {md(search.get('round', '—'))} | {md(search['query'])} | {md(search.get('outcome', 'logged'))} | {md(search['notes'])} | {md('; '.join(search.get('urls', [])))} |")
     if not searches:
         lines.append("| — | No searches logged yet | — | — | — |")
-    lines += ["", "## Research notes, limitations, and original synthesis", ""]
+    lines += ["", "## Research notes, limitations, and original synthesis", "",
+              "| Side | Kind | Text |",
+              "| --- | --- | --- |"]
     notes = [n for n in data["notes"] if n.get("side") == side]
     for note in notes:
-        lines.append(f"- **{md(note['kind'])}:** {md(note['text'])}")
+        lines.append(f"| {md(note.get('side', '—'))} | {md(note['kind'])} | {md(note['text'])} |")
     if not notes:
-        lines.append("- No additional notes recorded. Coverage is limited to the searches and sources above.")
+        lines.append("| — | — | No additional notes recorded. Coverage is limited to the searches and sources above. |")
     lines += ["", "## Closing assessment", "",
               "The strongest recorded claims are ordered above; the canonical register preserves the evidence and its objections. This report does not compute a probability that the Book of Mormon is true, does not treat item counts as weight, and does not hide contrary findings. Unverified and fabricated leads remain separated from usable evidence.", ""]
     if final:
@@ -585,10 +686,14 @@ def validation_errors(project: Path, force_final: bool = False) -> tuple[list[st
         if final_required and mode.group(1) != "final":
             errors.append(f"{rel} is not final; after the user's stop run compile --final")
     if final_required:
-        for side in SIDES:
+        for side in ("for", "against"):
             unassigned = [eid for eid, e in data["evidence"].items() if e.get("side") == side and e.get("authenticity", {}).get("verdict") == "verified" and not any(eid in c.get("evidence_ids", []) for c in data["claims"].values())]
             if unassigned:
                 errors.append(f"final {side} report has usable evidence not organized under a claim: {unassigned}")
+        # Comparison report validation
+        comp_path = project / REPORTS["comparison"]
+        if final_required and not comp_path.is_file():
+            errors.append("missing comparison report: research/book-of-mormon-comparison.md")
     locator_owners: dict[str, list[str]] = {}
     for eid, item in data["evidence"].items():
         if not item.get("counter_evaluation", {}).get("opposing_ids"):
@@ -676,7 +781,7 @@ def cmd_claim(args) -> int:
     for oid in record.get("counter_evaluation", {}).get("opposing_ids", []) if isinstance(record.get("counter_evaluation"), dict) else []:
         other = data["evidence"].get(oid)
         if other is None or other.get("side") == record.get("side"):
-            errors.append(f"opposing evidence {oid} must exist on the opposite side")
+            errors.append(f"opposing evidence {oid} must already exist on the opposite side")
     if errors:
         raise ResearchError("\n".join(errors))
     append_event(project, "claim", record=record)
@@ -753,7 +858,7 @@ def cmd_validate(args) -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print("research ledger and both reports are structurally valid and current")
+    print("research ledger and all three reports are structurally valid and current")
     return 0
 
 

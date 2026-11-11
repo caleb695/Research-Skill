@@ -6,10 +6,10 @@ This skill has **one fixed task**: the complete prompt in
 required, and arguments do not replace the task.
 
 Investigate whether the Book of Mormon is true without predetermining the
-answer. Alternate **for → against → for → against** research rounds. Keep two
+answer. Alternate **for → against → for → against** research rounds. Keep three
 separate, durable reports. Treat completion of a search, a report, or a category
 as the end of a round, never permission to finish. Only the user's stop signal
-ends research; then compile the two final reports before responding.
+ends research; then compile the three final reports before responding.
 
 ## Fixed-task rule
 
@@ -36,7 +36,7 @@ ends research; then compile the two final reports before responding.
   ancient origins, and claimed divine character. State which proposition each
   item actually bears on; do not silently substitute a narrower claim.
 - Treat the Bible as true **as the user's stipulated premise**. Label that
-  assumption in both reports. Still check manuscripts, translations, genre,
+  assumption in all three reports. Still check manuscripts, translations, genre,
   chronology, and interpretation; the premise does not settle disputed readings.
 - Treat the Book of Mormon as a primary source for its own contents and claims,
   not independent proof that those claims happened.
@@ -75,7 +75,7 @@ Book of Mormon enforcement profile by default:
 
 - The Stop hook runs a built-in research validator. It checks the append-only
   ledger, alternating rounds, evidence schema, scoring caps, duplicate keys,
-  cross-side references, and both report digests. `--no-gates` does not remove it.
+  cross-side references, and all three report digests. `--no-gates` does not remove it.
 - The PreToolUse hook blocks hand-editing the ledger, state, generated reports,
   or validating helpers; blocks `compile --final` before a real user stop; and
   blocks arming/disarming by the agent.
@@ -100,10 +100,11 @@ python3 infinite/scripts/infinite_research.py --dir . status
 ```
 
 The helper uses `.infinite/ledger.jsonl` for append-only research events and
-`.infinite/state.json` for the round cursor. It writes two working documents:
+`.infinite/state.json` for the round cursor. It writes three working documents:
 
 - `research/book-of-mormon-for.md`
 - `research/book-of-mormon-against.md`
+- `research/book-of-mormon-comparison.md`
 
 Keep source notes, rejected leads, searches, scores, and revisions in the
 ledger. Do not rely on conversation memory. Compile checkpoint reports after
@@ -205,11 +206,11 @@ items and the categories still needing work.
 
 ### 7. Google Docs integration
 
-The agent may view and edit Google Docs via `infinite/scripts/google_docs_client.py`.
-All Google Doc operations are logged in the append-only ledger as search/note events
-and must be authenticated, contextualized, and scored like any other evidence.
-Credentials must be placed in `.google/credentials.json` or specified via
-`GOOGLE_APPLICATION_CREDENTIALS`.
+The agent may view and edit Google Docs via
+`infinite/scripts/google_docs_client.py`. All Google Doc operations are logged
+in the append-only ledger as search/note events and must be authenticated,
+contextualized, and scored like any other evidence. Credentials must be placed
+in `.google/credentials.json` or specified via `GOOGLE_APPLICATION_CREDENTIALS`.
 
 ### 8. When searching stops producing new items
 
@@ -225,19 +226,22 @@ discovery unless independently documented. Make comparisons reproducible with
 exact citations and method notes. A fruitless round is legitimate progress when
 it records where, how, and why the search failed and what to try next.
 
-## On stop: compile two final reports
+## On stop: compile three final reports
 
 1. Stop searching. Do not start another research round.
 2. Reconcile the ledger, corrections, duplicates, and claim links already found.
 3. Run `compile --final` only because the user actually stopped, then `validate`.
    With research enforcement installed, the user-stop hook records the stop and
-   the validator checks that both final reports match the ledger before allowing
+   the validator checks that all three final reports match the ledger before allowing
    the conversation to finish.
-4. Present both documents. Each must contain ranked claims, category rankings,
+4. Present three documents. Each must contain ranked claims, category rankings,
    ranked evidence, source/provenance checks, context/POV, assumptions,
    limitations, opposing-evidence evaluations, rejected leads, and original
    synthesis. Include every recorded finding, with quarantined items clearly
    separated from usable evidence.
+   - `research/book-of-mormon-for.md`
+   - `research/book-of-mormon-against.md`
+   - `research/book-of-mormon-comparison.md`
 5. Give a short closing summary with the strongest arguments on each side,
    decisive uncertainties, coverage limits, and how to resume. Do not subtract
    scores or claim a mathematical proof of truth or falsity.
