@@ -1,0 +1,21 @@
+{
+  "name": "infinite",
+  "version": "1.3.1",
+  "description": "Single-purpose fixed prompt with deterministic OpenHands Cloud hook enforcement and Google Docs support: say \"use this skill\" or /infinite to run the bundled Book of Mormon evidence-research task until stop, then compile two ranked reports.",
+  "author": {
+    "name": "caleb695"
+  },
+  "homepage": "https://github.com/caleb695/Research-Skill",
+  "repository": "https://github.com/caleb695/Research-Skill",
+  "license": "MIT",
+  "keywords": [
+    "fixed-task",
+    "research",
+    "evidence",
+    "book-of-mormon",
+    "google-docs",
+    "long-running",
+    "never-stop",
+    "enforcement"
+  ]
+}

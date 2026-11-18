@@ -1,0 +1,38 @@
+{
+  "stop": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash \"${PLUGIN_ROOT}/infinite/scripts/stop_hook.sh\" --policy eyJhcm1lZF9hdCI6IjIwMjYtMTEtMTFUMTY6MzM6NDUrMDA6MDAiLCJnYXRlcyI6W10sIm1vZGUiOiJzdGFuZGJ5IiwicHJvZmlsZSI6ImJvb2stb2YtbW9ybW9uIiwicmVxdWlyZV9yb3VuZHMiOjEsInYiOjJ9",
+          "timeout": 90
+        }
+      ]
+    }
+  ],
+  "pre_tool_use": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash \"${PLUGIN_ROOT}/infinite/scripts/pretool_hook.sh\" --policy eyJhcm1lZF9hdCI6IjIwMjYtMTEtMTFUMTY6MzM6NDUrMDA6MDAiLCJnYXRlcyI6W10sIm1vZGUiOiJzdGFuZGJ5IiwicHJvZmlsZSI6ImJvb2stb2YtbW9ybW9uIiwicmVxdWlyZV9yb3VuZHMiOjEsInYiOjJ9",
+          "timeout": 20
+        }
+      ]
+    }
+  ],
+  "user_prompt_submit": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash \"${PLUGIN_ROOT}/infinite/scripts/userprompt_hook.sh\" --policy eyJhcm1lZF9hdCI6IjIwMjYtMTEtMTFUMTY6MzM6NDUrMDA6MDAiLCJnYXRlcyI6W10sIm1vZGUiOiJzdGFuZGJ5IiwicHJvZmlsZSI6ImJvb2stb2YtbW9ybW9uIiwicmVxdWlyZV9yb3VuZHMiOjEsInYiOjJ9",
+          "timeout": 15
+        }
+      ]
+    }
+  ]
+}

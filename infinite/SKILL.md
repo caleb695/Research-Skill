@@ -1,3 +1,26 @@
+---
+name: infinite
+description: >-
+  Single-purpose Infinite skill that runs one fixed bundled Book of Mormon
+  evidence-research prompt without requiring task arguments. Use when the user
+  says "use this skill", "use infinite", "use the infinite skill", or "/infinite".
+  Alternates verified for/against rounds, scores and deduplicates evidence,
+  evaluates opposing claims, supports Google Docs viewing/editing, and compiles
+  two ranked final reports when the user says stop.
+triggers:
+- use this skill
+- use the infinite skill
+- use infinite skill
+- use infinite
+- /infinite
+- indefinitely research
+license: MIT
+compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients.
+metadata:
+  author: caleb695
+  version: "1.3.1"
+---
+
 # Infinite — fixed Book of Mormon evidence research
 
 This skill has **one fixed task**: the complete prompt in
@@ -48,10 +71,12 @@ ends research; then compile the two final reports before responding.
 - Seek the strongest available cases on both sides. Equal numbers of items,
   sources, or rounds do not imply equal evidential weight.
 - Google Docs integration: The agent may view and edit Google Docs via
-  `infinite/scripts/google_docs_client.py`. All Google Doc operations are logged
-  in the append-only ledger as search/note events and must be authenticated,
-  contextualized, and scored like any other evidence. Credentials must be placed
-  in `.google/credentials.json` or specified via `GOOGLE_APPLICATION_CREDENTIALS`.
+  `infinite_research.py --dir . google-docs ...` (or `google_docs_client.py`).
+  All Google Doc operations are logged in the append-only ledger as search/note
+  events, respect `STOP_REQUESTED`, and must be authenticated, contextualized,
+  and scored like any other evidence. Credentials may be placed in `.google` or
+  `.google/credentials.json`, or supplied via `GOOGLE_APPLICATION_CREDENTIALS`
+  or `GOOGLE_SERVICE_ACCOUNT_JSON`.
 
 ## Read before the first round
 
@@ -150,10 +175,12 @@ forgery claims, and independent checks. A webpage existing is not authentication
 of its claim. Record what was checked and what remains uncertain.
 
 Google Docs integration: The agent may view and edit Google Docs via
-`infinite/scripts/google_docs_client.py`. All Google Doc operations are logged
-in the append-only ledger as search/note events and must be authenticated,
-contextualized, and scored like any other evidence. Credentials must be placed
-in `.google/credentials.json` or specified via `GOOGLE_APPLICATION_CREDENTIALS`.
+`infinite_research.py --dir . google-docs ...` (or `google_docs_client.py`).
+All Google Doc operations are logged in the append-only ledger as search/note
+events, respect `STOP_REQUESTED`, and must be authenticated, contextualized,
+and scored like any other evidence. Credentials may be placed in `.google` or
+`.google/credentials.json`, or supplied via `GOOGLE_APPLICATION_CREDENTIALS`
+or `GOOGLE_SERVICE_ACCOUNT_JSON`.
 
 ### 4. Reconstruct context and investigate deeply
 
@@ -205,11 +232,12 @@ items and the categories still needing work.
 
 ### 7. Google Docs integration
 
-The agent may view and edit Google Docs via `infinite/scripts/google_docs_client.py`.
-All Google Doc operations are logged in the append-only ledger as search/note events
-and must be authenticated, contextualized, and scored like any other evidence.
-Credentials must be placed in `.google/credentials.json` or specified via
-`GOOGLE_APPLICATION_CREDENTIALS`.
+The agent may view and edit Google Docs via `infinite_research.py --dir . google-docs ...`
+(or `google_docs_client.py`). All Google Doc operations are logged in the
+append-only ledger as search/note events, respect `STOP_REQUESTED`, and must be
+authenticated, contextualized, and scored like any other evidence. Credentials
+may be placed in `.google` or `.google/credentials.json`, or supplied via
+`GOOGLE_APPLICATION_CREDENTIALS` or `GOOGLE_SERVICE_ACCOUNT_JSON`.
 
 ### 8. When searching stops producing new items
 

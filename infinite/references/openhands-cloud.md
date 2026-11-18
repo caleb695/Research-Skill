@@ -1,118 +1,101 @@
 # OpenHands Cloud compatibility
 
-Checked on 2026-11-07 against the current OpenHands documentation repository
-(`OpenHands/docs`, commit `bde5151ccf7cd0d53f248c05d4cbed6927d6f258`) and SDK
-(`OpenHands/software-agent-sdk`, commit
-`18f6390502e0c1b5c162937294be9e19340b4a94`). This is a source/contract check plus
-local tests, not a claim that a live hosted Cloud conversation was run here.
+Checked on 2026-11-11 against the upstream OpenHands documentation repository
+(`OpenHands/docs`), SDK & Agent Server (`OpenHands/software-agent-sdk`),
+frontend/Cloud app client (`OpenHands/OpenHands`), and official extensions
+(`OpenHands/extensions`).
 
-## What Cloud supports
+## Why Cloud requires conversation-start wiring
 
-- Agent Skills are discovered as `<skills-dir>/<name>/SKILL.md`. The name must
-  match the directory, use lowercase letters/digits/single hyphens, and be at
-  most 64 characters; description is required and limited to 1024 characters.
-- Project skills live at `.agents/skills/` in the conversation workspace. This
-  repo ships `.agents/skills/infinite/SKILL.md` as a launcher to the canonical
-  `infinite/` package, so selecting this repo as the workspace exposes the skill.
-- Cloud can also import/load a Git-hosted skill or plugin by repository path.
-  Select `infinite/` as the skill directory; current plugin loaders also accept a
-  single root `SKILL.md` in a plugin package. The canonical package is
-  self-contained after installation.
-- Repository hooks are loaded from `.openhands/hooks.json` in the working folder.
-  Current docs explicitly include OpenHands Cloud. Command hooks run with cwd set
-  to the working folder and receive `OPENHANDS_PROJECT_DIR` plus JSON on stdin.
-- Exit code 2 blocks; other nonzero codes are non-blocking errors. Stop feedback
-  must be in `additionalContext` to reach the agent reliably.
+In OpenHands Cloud, each conversation provisions a sandbox runtime and loads
+skills, plugins, and lifecycle hooks (`LocalConversation._ensure_plugins_loaded`)
+when the conversation starts:
 
-Sources in the checked docs checkout:
-`overview/skills.mdx`, `overview/skills/adding.mdx`,
-`openhands/usage/customization/hooks.mdx`,
-`openhands/usage/customization/repository.mdx`,
-`openhands/usage/cloud/plugin-launcher.mdx`. SDK sources:
-`openhands-sdk/openhands/sdk/skills/{skill,utils}.py` and
-`openhands-sdk/openhands/sdk/hooks/{config,executor,conversation_hooks}.py`.
+- Project skills are discovered from `<workspace>/.agents/skills/<name>/SKILL.md`.
+  Every `SKILL.md` must start with valid YAML frontmatter (`name` matching the
+  directory name, `description` <= 1024 chars, and `triggers` list for automatic
+  keyword injection on phrases like `use this skill` or `/infinite`).
+- Repository hooks in `<workspace>/.openhands/hooks.json` and plugin hooks in
+  `<plugin>/hooks/hooks.json` (with `PLUGIN_ROOT` exported by the SDK hook
+  executor) are bound once at conversation initialization. Writing
+  `.openhands/hooks.json` mid-conversation does **not** attach hooks to the
+  already-running conversation.
+- `/add-skill` sparse-checkouts the target directory into
+  `<workspace>/.agents/skills/infinite/`; OpenHands rebuilds the skill catalog on
+  the **next new conversation** in that workspace.
 
-## Use the skill in Cloud
+## Supported OpenHands Cloud workflows
 
-1. Push this repository/branch and connect it to OpenHands Cloud.
-2. Start a conversation with this repository as the workspace, or import the
-   `infinite/` directory as a Git-hosted skill. Enable/select `infinite` if the UI
-   presents a skill catalog. Start a new conversation after changing skill files.
-3. Send only `use this skill` or `/infinite`. The full task is bundled in
-   `infinite/references/fixed-task.md`; no task arguments are required.
-4. The launcher reads `infinite/SKILL.md` and the fixed prompt; the agent
-   initializes the ledger and alternates for/against rounds using the workspace's
-   web/browser tools.
+### 1. Use this repository directly as the Cloud workspace (zero manual setup)
 
-The skill does not grant network access. If the Cloud environment restricts
-hosts, lacks a browser, or hits a paywall, record the limitation and use accessible
-primary texts/other source classes. Never pretend a blocked source was checked.
+1. Connect `caleb695/Research-Skill` in OpenHands Cloud and start a conversation.
+2. `.agents/skills/infinite/SKILL.md` exposes the `infinite` project skill,
+   `.openhands/setup.sh` ensures executable permissions and installs optional
+   Google Docs client libraries, and `.openhands/hooks.json` pre-loads the
+   deterministic Book of Mormon hooks in **standby mode** (`mode=standby`).
+3. Ordinary non-skill prompts run and finish normally because `.openhands/guard/ARMED`
+   is absent in standby mode.
+4. Send `use this skill` or `/infinite`: `UserPromptSubmit` immediately arms
+   `.openhands/guard/ARMED` in the running Cloud conversation, and `PreToolUse` +
+   `Stop` enforce the full alternating research loop until you say `stop`.
 
-## Deterministic enforcement in Cloud
+### 2. Launch on any repository via OpenHands Cloud Plugin Launcher (`/launch` or Plugins UI)
 
-Install from a terminal/setup environment **before starting the conversation**:
-
-```bash
-bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill
-```
-
-This installs the complete skill, copies the research validator beside the hooks,
-enables the built-in Book of Mormon Stop gate, initializes the two reports, and
-writes hooks with **repo-relative commands** such as:
+Both `infinite/` (`repo_path: "infinite"`) and the repository root ship valid
+OpenHands plugin manifests (`.plugin/plugin.json` and `.claude-plugin/plugin.json`)
+plus `hooks/hooks.json` using `${PLUGIN_ROOT}`:
 
 ```json
-{
-  "stop": [{"matcher": "*", "hooks": [{
-    "command": "bash .openhands/hooks/infinite-stop.sh --policy <blob>",
-    "timeout": 615
-  }]}]
-}
+[
+  {
+    "source": "github:caleb695/Research-Skill",
+    "ref": "main",
+    "repo_path": "infinite"
+  }
+]
 ```
 
-The exact timeout is derived from configured gate budgets plus the built-in
-research validator so the hook does not time out before its gates. Commit the
-generated `.openhands/hooks.json` and hook
-scripts if you want the wiring to travel with the repository; keep
-`.openhands/guard/` and `.infinite/` scratch state out of Git. Do not commit a
-policy containing secrets. Start a new conversation after installation because
-hooks are loaded at conversation start.
+Or quick test URL format:
 
-The installer's embedded policy is fixed for that loaded hook command and is
-passed to Stop, PreToolUse, and UserPromptSubmit. The agent cannot weaken it by
-editing the on-disk mirror. User stop in research mode writes `STOP_REQUESTED`;
-the gate then blocks finishing only until both final reports are compiled and
-validated. It does not order more research. PreToolUse blocks hand-editing the
-ledger/reports/helpers and blocks `compile --final` before that user stop. Use
-`--no-arm` for standby hooks that arm on `use this skill`. The user can always
-run the installer with `--disarm` or `--uninstall` from their own terminal.
+```text
+https://app.all-hands.dev/launch?plugin_source=github:caleb695/Research-Skill&plugin_ref=main&plugin_repo_path=infinite&message=use%20this%20skill
+```
 
-Without hooks, the skill still runs as instructions and the agent must obey the
-stop/final-report protocol. Cloud iteration/budget limits still end a run; the
-ledger and reports make `continue` resumable. Nothing here overrides the user,
-Cloud policy, or platform limits.
+When attached as a Cloud plugin, OpenHands loads the `infinite` skill, `/infinite:infinite`
+command, and `${PLUGIN_ROOT}` standby enforcement hooks into the conversation
+from turn 1—even on an empty sandbox or another repository. Note that
+`infinite_guard.py` explicitly allows executing helpers and reading references
+from OpenHands' `~/.openhands/{plugins,skills,cache}` directories while still
+blocking any tampering with `<workspace>/.openhands/{guard,hooks,hooks.json}`.
+
+### 3. Import into another workspace via `/add-skill` or installer
+
+- In an existing Cloud workspace, run:
+  `/add-skill https://github.com/caleb695/Research-Skill/tree/main/infinite`
+  (or `bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill --no-arm`),
+  then **start a new conversation** on that workspace so OpenHands reloads the
+  skill catalog (and `.openhands/hooks.json` if installed).
+
+## Google Docs & Cloud Secrets
+
+To use Google Docs viewing/editing in OpenHands Cloud:
+- Add a Cloud Secret named `GOOGLE_SERVICE_ACCOUNT_JSON` (raw or base64 JSON of
+  the service account key) or `GOOGLE_APPLICATION_CREDENTIALS`, **or**
+- Place the key in `.google/credentials.json` or `.google` in the workspace.
 
 ## Portability rules enforced by tests
 
-- No installer-generated hook command may contain the build machine's absolute
-  project path. Commands are relative to the Cloud working folder; dispatchers
-  resolve their own directory for guard lookup.
-- A copied/relocated checkout must still deny a finish attempt and run the
-  research gate from the new path.
-- The project launcher and canonical skill must pass strict name/description/
-  trigger checks; no `paths:` key may shadow the keyword trigger.
-- Hook JSON uses snake_case events, synchronous command hooks, exit 2 for denial,
-  and actionable `additionalContext`.
-- The Stop hook timeout exceeds the sum of gate timeouts.
+- All committed `.openhands/hooks.json` commands are repo-relative (`bash .openhands/hooks/...`),
+  and all plugin `hooks/hooks.json` commands resolve through `${PLUGIN_ROOT}`.
+- Relocated checkouts and empty workspaces using `PLUGIN_ROOT` both enforce
+  `UserPromptSubmit`, `PreToolUse`, and `Stop` identically.
+- Canonical `infinite/SKILL.md`, launcher `.agents/skills/infinite/SKILL.md`, and
+  root `SKILL.md` all pass strict AgentSkills frontmatter and trigger checks.
 
-Run:
+Run locally:
 
 ```bash
 bash tests/smoke.sh
 python3 tests/openhands_compat.py
 python3 tests/test_research.py
 ```
-
-`tests/openhands_compat.py` is a faithful subset of the SDK contract, not the SDK
-itself. A live Cloud smoke test remains the final deployment check: start a new
-conversation, confirm `infinite` loads, verify one for/against checkpoint, say
-`stop`, and confirm both final reports are produced before the run finishes.

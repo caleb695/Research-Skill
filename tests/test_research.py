@@ -368,6 +368,200 @@ class ResearchTests(unittest.TestCase):
         self.hook(relocated, "prompt", "use this skill")
         self.assertEqual(self.hook(relocated, "stop").returncode, 2)
 
+    def plugin_hook(self, project: Path, plugin_root: Path, event: str, message=None, tool_name=None, tool_input=None):
+        config = json.loads((plugin_root / "hooks/hooks.json").read_text(encoding="utf-8"))
+        key = {"stop": "stop", "prompt": "user_prompt_submit", "pretool": "pre_tool_use"}[event]
+        command = config[key][0]["hooks"][0]["command"]
+        payload = {
+            "event_type": {"stop": "Stop", "prompt": "UserPromptSubmit", "pretool": "PreToolUse"}[event],
+            "working_dir": str(project),
+            "session_id": "cloud-plugin-test",
+        }
+        if message is not None:
+            payload["message"] = message
+        if tool_name is not None:
+            payload["tool_name"] = tool_name
+            payload["tool_input"] = tool_input or {}
+        env = dict(os.environ, OPENHANDS_PROJECT_DIR=str(project), PLUGIN_ROOT=str(plugin_root))
+        return subprocess.run(command, shell=True, cwd=project, env=env, input=json.dumps(payload), capture_output=True, text=True, timeout=60)
+
+    def test_cloud_plugin_hooks_work_in_empty_workspace_via_plugin_root(self):
+        # Simulate OpenHands Cloud caching the plugin under ~/.openhands/plugins/installed/infinite
+        # and running a conversation in a clean workspace that has NO .openhands/hooks.json.
+        fake_home = Path(self.tmp.name) / "cloud_home"
+        cached_plugin = fake_home / ".openhands" / "plugins" / "installed" / "infinite"
+        shutil.copytree(REPO / "infinite", cached_plugin)
+        empty_ws = Path(self.tmp.name) / "empty_cloud_workspace"
+        empty_ws.mkdir()
+
+        # Standby before invocation: allows normal work & finish without creating .openhands/guard
+        self.assertEqual(self.plugin_hook(empty_ws, cached_plugin, "stop").returncode, 0)
+        self.assertFalse((empty_ws / ".openhands/guard").exists())
+        self.assertEqual(
+            self.plugin_hook(empty_ws, cached_plugin, "pretool", tool_name="terminal", tool_input={"command": "pytest -q"}).returncode,
+            0,
+        )
+
+        # User invokes the skill via "use this skill" (or /infinite:infinite)
+        res = self.plugin_hook(empty_ws, cached_plugin, "prompt", message="use this skill")
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue((empty_ws / ".openhands/guard/ARMED").is_file())
+
+        # Agent can run helpers & read references from ~/.openhands/plugins/... (not falsely blocked as .openhands/guard)
+        init_cmd = f"python3 {cached_plugin / 'scripts/infinite_research.py'} --dir . init"
+        self.assertEqual(
+            self.plugin_hook(empty_ws, cached_plugin, "pretool", tool_name="terminal", tool_input={"command": init_cmd}).returncode,
+            0,
+        )
+        subprocess.run(["python3", str(cached_plugin / "scripts/infinite_research.py"), "--dir", str(empty_ws), "init"], check=True, capture_output=True)
+
+        # Agent tampering is blocked, and premature finish is denied by the plugin's Stop hook
+        self.assertEqual(
+            self.plugin_hook(empty_ws, cached_plugin, "pretool", tool_name="terminal", tool_input={"command": "echo '{}' > .infinite/ledger.jsonl"}).returncode,
+            2,
+        )
+        stop_res = self.plugin_hook(empty_ws, cached_plugin, "stop")
+        self.assertEqual(stop_res.returncode, 2)
+        self.assertIn("next for round", stop_res.stdout)
+
+        # User says stop -> finalization allowed -> clean exit
+        self.plugin_hook(empty_ws, cached_plugin, "prompt", message="stop")
+        self.assertTrue((empty_ws / ".openhands/guard/STOP_REQUESTED").is_file())
+        subprocess.run(["python3", str(cached_plugin / "scripts/infinite_research.py"), "--dir", str(empty_ws), "compile", "--final"], check=True, capture_output=True)
+        final_stop = self.plugin_hook(empty_ws, cached_plugin, "stop")
+        self.assertEqual(final_stop.returncode, 0, final_stop.stdout + final_stop.stderr)
+        self.assertFalse((empty_ws / ".openhands/guard/ARMED").exists())
+
+    def test_prewired_repo_standby_hooks_work_in_fresh_cloud_clone(self):
+        clone = Path(self.tmp.name) / "fresh_cloud_clone"
+        clone.mkdir()
+        shutil.copytree(REPO / ".openhands", clone / ".openhands")
+        shutil.copytree(REPO / ".agents", clone / ".agents")
+        shutil.copytree(REPO / "infinite", clone / "infinite")
+        shutil.copy2(REPO / "SKILL.md", clone / "SKILL.md")
+        self.assertFalse((clone / ".openhands/guard").exists())
+
+        # Ordinary prompt finishes cleanly in standby mode
+        self.hook(clone, "prompt", "explain how scoring caps work")
+        self.assertEqual(self.hook(clone, "stop").returncode, 0)
+        self.assertFalse((clone / ".openhands/guard").exists())
+
+        # Invoking the skill arms enforcement in the same Cloud conversation
+        self.hook(clone, "prompt", "/infinite")
+        self.assertTrue((clone / ".openhands/guard/ARMED").is_file())
+        subprocess.run(["python3", str(clone / "infinite/scripts/infinite_research.py"), "--dir", str(clone), "init"], check=True, capture_output=True)
+        self.assertEqual(self.hook(clone, "stop").returncode, 2)
+        self.hook(clone, "prompt", "stop")
+        subprocess.run(["python3", str(clone / "infinite/scripts/infinite_research.py"), "--dir", str(clone), "compile", "--final"], check=True, capture_output=True)
+        self.assertEqual(self.hook(clone, "stop").returncode, 0)
+
+    def test_google_docs_credentials_subcommand_ledger_and_stop_guard(self):
+        import base64
+        from unittest import mock
+        if str(SCRIPTS) not in sys.path:
+            sys.path.insert(0, str(SCRIPTS))
+        import google_docs_client as gdocs
+
+        # 1. Existing repo .google file (when present) and synthetic .google file / dir / Cloud secret env vars
+        ws_file = Path(self.tmp.name) / "ws_dot_google_file"
+        ws_file.mkdir()
+        fake_key = {
+            "type": "service_account",
+            "project_id": "test-proj",
+            "client_email": "bot@test-proj.iam.gserviceaccount.com",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n",
+        }
+        (ws_file / ".google").write_text(json.dumps(fake_key), encoding="utf-8")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+            os.environ.pop("GOOGLE_SERVICE_ACCOUNT_JSON", None)
+            os.environ.pop("GOOGLE_CREDENTIALS_JSON", None)
+            loaded = gdocs.load_credentials_info(project=ws_file)
+            self.assertEqual(loaded["client_email"], fake_key["client_email"])
+            if (REPO / ".google").is_file():
+                repo_creds = gdocs.load_credentials_info(project=REPO)
+                self.assertIn("client_email", repo_creds)
+
+        ws_dir = Path(self.tmp.name) / "ws_dot_google_dir"
+        (ws_dir / ".google").mkdir(parents=True)
+        (ws_dir / ".google" / "credentials.json").write_text(json.dumps(fake_key), encoding="utf-8")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+            os.environ.pop("GOOGLE_SERVICE_ACCOUNT_JSON", None)
+            self.assertEqual(gdocs.load_credentials_info(project=ws_dir)["project_id"], "test-proj")
+
+        b64_secret = base64.b64encode(json.dumps(fake_key).encode("utf-8")).decode("ascii")
+        with mock.patch.dict(os.environ, {"GOOGLE_SERVICE_ACCOUNT_JSON": b64_secret}, clear=False):
+            os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+            self.assertEqual(gdocs.load_credentials_info(project=self.project)["project_id"], "test-proj")
+
+        # 2. End-to-end google-docs view & edit via infinite_research.py with mocked Google Docs API
+        self.init()
+        (self.project / ".google").write_text(json.dumps(fake_key), encoding="utf-8")
+        fake_doc = {
+            "title": "Book of Mormon Witness Notes",
+            "body": {
+                "content": [
+                    {"paragraph": {"elements": [{"textRun": {"content": "Oliver Cowdery statement.\n"}}]}},
+                    {"table": {"tableRows": [{"tableCells": [
+                        {"content": [{"paragraph": {"elements": [{"textRun": {"content": "Witness"}}]}}]},
+                        {"content": [{"paragraph": {"elements": [{"textRun": {"content": "1830"}}]}}]},
+                    ]}]}},
+                ]
+            },
+        }
+        fake_service = mock.MagicMock()
+        fake_service.documents.return_value.get.return_value.execute.return_value = fake_doc
+        fake_service.documents.return_value.batchUpdate.return_value.execute.return_value = {"replies": [{}]}
+
+        with mock.patch.object(gdocs, "build_service", return_value=fake_service):
+            rc_view = research.main([
+                "--dir", str(self.project),
+                "google-docs", "view",
+                "--doc-id", "doc123",
+                "--url", "https://docs.google.com/document/d/doc123/edit",
+            ])
+            self.assertEqual(rc_view, 0)
+            rc_edit = research.main([
+                "--dir", str(self.project),
+                "google-docs", "edit",
+                "--doc-id", "doc123",
+                "--url", "https://docs.google.com/document/d/doc123/edit",
+                "--content", "Appended synthesis note.",
+            ])
+            self.assertEqual(rc_edit, 0)
+
+        # Ledger entries are schema-valid and interim reports stay fresh for `validate`
+        self.run_py(RESEARCH, "validate")
+        parsed = research.store(self.project)
+        self.assertEqual(len(parsed["searches"]), 1)
+        self.assertEqual(parsed["searches"][0]["urls"], ["https://docs.google.com/document/d/doc123/edit"])
+        self.assertEqual(len(parsed["notes"]), 1)
+        self.assertEqual(parsed["notes"][0]["kind"], "original-synthesis")
+
+        # STOP_REQUESTED blocks both google_docs_client operations and PreToolUse invocations
+        proc = subprocess.run(["bash", str(INSTALL), "--dir", str(self.project), "--install-skill", "--no-gates"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.hook(self.project, "prompt", "stop")
+        with mock.patch.object(gdocs, "build_service", return_value=fake_service):
+            self.assertEqual(
+                research.main([
+                    "--dir", str(self.project),
+                    "google-docs", "edit",
+                    "--doc-id", "doc123",
+                    "--url", "https://docs.google.com/document/d/doc123/edit",
+                    "--content", "Should be blocked after stop",
+                ]),
+                1,
+            )
+        pretool_gd = self.hook(
+            self.project,
+            "pretool",
+            tool_name="terminal",
+            tool_input={"command": "python3 infinite/scripts/infinite_research.py --dir . google-docs edit --doc-id d1 --url https://docs.google.com/document/d/d1/edit --content x"},
+        )
+        self.assertEqual(pretool_gd.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

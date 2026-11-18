@@ -12,11 +12,12 @@ triggers:
 - use infinite skill
 - use infinite
 - /infinite
+- indefinitely research
 license: MIT
 compatibility: OpenHands Cloud project-skill discovery; canonical resources live in the repository's infinite/ directory.
 metadata:
   author: caleb695
-  version: "1.3.0"
+  version: "1.3.1"
 ---
 
 # Infinite repository launcher

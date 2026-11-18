@@ -57,8 +57,9 @@ esac
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --dir) TARGET_DIR="$2"; shift 2 ;;
+        --dir|--workspace) TARGET_DIR="$2"; shift 2 ;;
         --print|--dry-run) DRY_RUN=1; shift ;;
+        --arm) ARM=1; shift ;;
         --no-arm) ARM=0; shift ;;
         --status) ACTION="status"; shift ;;
         --disarm|--stop) ACTION="disarm"; shift ;;
@@ -129,6 +130,10 @@ install_skill_files() {
     mkdir -p "$dest"
     local files=(
         SKILL.md README.md
+        .plugin/plugin.json
+        .claude-plugin/plugin.json
+        .codex-plugin/plugin.json
+        hooks/hooks.json
         references/fixed-task.md
         references/loop-protocol.md
         references/audit-playbook.md
@@ -136,11 +141,13 @@ install_skill_files() {
         references/book-of-mormon-research.md
         references/evidence-schema.md
         references/openhands-cloud.md
+        references/google-docs-integration.md
         commands/infinite.md
         assets/project.gitignore.fragment
         scripts/infinite_guard.py
         scripts/infinite_state.py
         scripts/infinite_research.py
+        scripts/google_docs_client.py
         scripts/stop_hook.sh
         scripts/pretool_hook.sh
         scripts/userprompt_hook.sh
@@ -220,7 +227,8 @@ fetch_or_copy scripts/userprompt_hook.sh "$HOOK_DIR/infinite-userprompt.sh"
 fetch_or_copy scripts/infinite_state.py "$HOOK_DIR/infinite_state.py"
 if [ "$RESEARCH" -eq 1 ]; then
     fetch_or_copy scripts/infinite_research.py "$HOOK_DIR/infinite_research.py"
-    chmod +x "$HOOK_DIR/infinite_research.py"
+    fetch_or_copy scripts/google_docs_client.py "$HOOK_DIR/google_docs_client.py"
+    chmod +x "$HOOK_DIR/infinite_research.py" "$HOOK_DIR/google_docs_client.py"
     # The research validator is built into the Stop hook for this profile. It is
     # not a removable shell gate, so --no-gates still enforces the fixed task.
 fi
