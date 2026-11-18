@@ -7,7 +7,7 @@ or judge historical truth. Those remain the agent's documented research work.
 
 Commands:
   init | status | lookup | evidence | revise | claim | search | note |
-  compile [--final] | validate [--final]
+  google-docs {view,edit} | compile [--final] | validate [--final]
 
 State is append-only in <project>/.infinite/ledger.jsonl. Reports are written to
 <project>/research/book-of-mormon-{for,against}.md. See
@@ -771,6 +771,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("note"); p.add_argument("--side", choices=SIDES, required=True); p.add_argument("--kind", choices=["method-limit", "original-synthesis", "closing-analysis"], required=True); p.add_argument("--text", required=True); p.set_defaults(func=cmd_note)
     p = sub.add_parser("compile"); p.add_argument("--final", action="store_true", help="only after an explicit user stop"); p.set_defaults(func=cmd_compile)
     p = sub.add_parser("validate"); p.add_argument("--final", action="store_true"); p.set_defaults(func=cmd_validate)
+    scripts_dir = Path(__file__).resolve().parent
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import google_docs_client
+    for gd_name in ("google-docs", "google_docs"):
+        gd = sub.add_parser(gd_name, help="view or edit Google Docs and log in ledger")
+        gd.add_argument("--credentials", default=None, help="path to Google service account JSON key")
+        gd_sub = gd.add_subparsers(dest="gd_command", required=True)
+        google_docs_client.register_subcommands(gd_sub)
     return parser
 
 

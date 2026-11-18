@@ -95,19 +95,32 @@ use this skill
 
 ### OpenHands Cloud
 
-- Use this repository as the conversation workspace: the project launcher at
-  `.agents/skills/infinite/SKILL.md` points to the canonical `infinite/` package.
-- Or import/load the Git-hosted `infinite/` directory as a skill/plugin and select
-  `infinite` for the conversation.
-- For enforcement, run the installer before the conversation and commit the
-  generated `.openhands/hooks.json` plus hook scripts if you want the wiring to
-  travel with the repo. Keep `.openhands/guard/` and `.infinite/` scratch state
-  out of Git. Start a new conversation after installing/changing skills or hooks.
+- **Use this repository directly as the Cloud workspace**: `.agents/skills/infinite/SKILL.md`
+  exposes the skill, `.openhands/setup.sh` prepares executable permissions and
+  optional Google Docs dependencies, and `.openhands/hooks.json` pre-wires the
+  Book of Mormon hooks in **standby mode**. Ordinary tasks run normally; saying
+  `use this skill` or `/infinite` arms deterministic enforcement immediately in
+  the same conversation.
+- **Launch as a Cloud Plugin on any workspace**: attach `github:caleb695/Research-Skill`
+  (with `repo_path: "infinite"` or from the repository root) in the OpenHands
+  Cloud Plugin Launcher (`/launch`) or Plugins UI. Both `infinite/` and the repo
+  root bundle `.plugin/plugin.json` and `hooks/hooks.json` (`${PLUGIN_ROOT}`),
+  so skills and hooks load automatically at conversation start.
+- **Import via `/add-skill`**: run
+  `/add-skill https://github.com/caleb695/Research-Skill/tree/main/infinite`
+  (and optionally `bash .agents/skills/infinite/scripts/install-openhands-hooks.sh --dir . --no-arm`),
+  then start a **new conversation** on that workspace.
+- **Google Docs in Cloud**: set `GOOGLE_SERVICE_ACCOUNT_JSON` (or
+  `GOOGLE_APPLICATION_CREDENTIALS`) in OpenHands Cloud Secrets, or place the
+  service-account JSON at `.google/credentials.json` (or `.google`), and use
+  `python3 infinite/scripts/infinite_research.py --dir . google-docs {view,edit} ...`.
 
-Hook commands are repo-relative, not tied to the installer's checkout path, and
-the Stop hook timeout is derived from its gate budgets. See
+Hook commands are repo-relative (or `${PLUGIN_ROOT}`-bound for plugins), not tied
+to any machine's checkout path. Keep `.openhands/guard/` and `.infinite/` scratch
+state out of Git. See
 [`infinite/references/openhands-cloud.md`](infinite/references/openhands-cloud.md)
-for the checked Cloud contract and the remaining live-deployment smoke test.
+and [`infinite/references/google-docs-integration.md`](infinite/references/google-docs-integration.md)
+for details.
 
 ## Durable state and helpers
 

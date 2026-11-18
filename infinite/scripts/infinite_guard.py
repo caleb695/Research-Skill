@@ -107,8 +107,11 @@ PROTECTED_PATH_PATTERNS = [
 ]
 
 # A destructive verb applied to the enforcement tree as a whole.
+# Exclude OpenHands' own skill/plugin/cache/memory user directories under ~/.openhands/
+# so Cloud plugin/skill execution paths (~/.openhands/plugins/..., ~/.openhands/cache/...)
+# are not misclassified as .openhands/guard or .openhands/hooks tampering.
 DESTRUCTIVE_COMMAND = r"(rm|rmdir|mv|truncate|shred|unlink|chmod|chown|sed\s+-i|tee|>>?)\b"
-PROTECTED_TREE = r"\.openhands\b|\binfinite_guard\b|\binfinite_(-stop|-pretool|-userprompt)\.sh\b"
+PROTECTED_TREE = r"\.openhands(?!/skills\b|/plugins\b|/cache\b|/microagents\b|/memory\b)\b|\binfinite_guard\b|\binfinite_(-stop|-pretool|-userprompt)\.sh\b"
 
 
 # --------------------------------------------------------------------------- #
@@ -325,6 +328,11 @@ def gate_report(gates: list[dict]) -> str:
 def ledger_status(project: Path, policy: dict) -> dict:
     rounds = [e for e in read_jsonl(project / LEDGER_REL) if e.get("event") == "round"]
     armed_at = str(policy.get("armed_at") or "")
+    if policy.get("mode") == "standby" and (project / GUARD_DIR / ARMED).is_file():
+        armed_text = (project / GUARD_DIR / ARMED).read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]*)", armed_text)
+        if match:
+            armed_at = match.group(1)
     since = [r for r in rounds if str(r.get("ts") or "") >= armed_at] if armed_at else rounds
     last = rounds[-1] if rounds else {}
     return {
@@ -406,7 +414,8 @@ def cmd_stop(payload: dict, project: Path, policy: dict | None, policy_supplied:
         log_event(project, "stop_allowed", mode=mode, round=ledger_round_label(project))
         return emit_allow()
     if mode == "standby" and not (project / GUARD_DIR / ARMED).exists():
-        log_event(project, "stop_allowed", mode=mode, reason="standby; fixed skill not invoked")
+        if (project / GUARD_DIR).is_dir():
+            log_event(project, "stop_allowed", mode=mode, reason="standby; fixed skill not invoked")
         return emit_allow()
 
     ledger = ledger_status(project, policy)
@@ -567,6 +576,7 @@ RESEARCH_WRITE_PATHS = [
 ]
 RESEARCH_CODE_PATHS = [
     r"(^|[^A-Za-z0-9_])infinite_(research|state|guard)\.py\b",
+    r"(^|[^A-Za-z0-9_])google_docs_client\.py\b",
     r"(^|[^A-Za-z0-9_])install-openhands-hooks\.sh\b",
     r"(^|[^A-Za-z0-9_])(stop|pretool|userprompt)_hook\.sh\b",
     r"(^|[^A-Za-z0-9_])infinite-(stop|pretool|userprompt)\.sh\b",
@@ -581,11 +591,23 @@ READ_ONLY_TOOL = re.compile(r"read|view|cat|grep|list", re.I)
 
 
 def research_active(project: Path, policy: dict | None) -> bool:
+    if (project / GUARD_DIR / "DISARMED").exists():
+        return False
     if policy is not None:
-        return policy.get("profile") == RESEARCH_PROFILE and policy.get("mode") != "disabled"
+        mode = policy.get("mode")
+        return (
+            policy.get("profile") == RESEARCH_PROFILE
+            and mode != "disabled"
+            and (mode != "standby" or (project / GUARD_DIR / ARMED).exists())
+        )
     config = read_json(project / GUARD_DIR / "config.json", {})
     state = read_json(project / ".infinite" / "state.json", {})
-    return (config.get("profile") == RESEARCH_PROFILE or state.get("profile") == RESEARCH_PROFILE) and config.get("mode", "required") != "disabled"
+    mode = config.get("mode", "required")
+    return (
+        (config.get("profile") == RESEARCH_PROFILE or state.get("profile") == RESEARCH_PROFILE)
+        and mode != "disabled"
+        and (mode != "standby" or (project / GUARD_DIR / ARMED).exists())
+    )
 
 
 def research_protected_reason(tool_name: str, tool_input: dict, project: Path, policy: dict | None) -> str | None:
@@ -606,7 +628,7 @@ def research_protected_reason(tool_name: str, tool_input: dict, project: Path, p
             return None
         write_paths = any(re.search(p, command) for p in RESEARCH_WRITE_PATHS)
         code_paths = any(re.search(p, command) for p in RESEARCH_CODE_PATHS)
-        helper = re.search(r"infinite_(research|state)\.py", command)
+        helper = re.search(r"(?:infinite_(?:research|state)|google_docs_client)\.py", command)
         if helper:
             if re.search(r"infinite_state\.py[^\n]*\b(arm|disarm)\b", command):
                 return "Blocked: arming/disarming is user-owned. Continue the fixed research task."
@@ -617,11 +639,14 @@ def research_protected_reason(tool_name: str, tool_input: dict, project: Path, p
             if stopped and re.search(r"infinite_state\.py[^\n]*\b(resume|log)\b", command):
                 return ("Blocked: research is stopped. Only a real user continue/resume message re-arms the loop; "
                         "until then only final-report reconciliation is allowed.")
-            if stopped and re.search(r"infinite_research\.py[^\n]*\b(evidence|revise|search|note)\b", command):
-                return ("Blocked: research is stopped. Do not record new evidence/searches; reconcile the existing "
-                        "ledger and compile final reports.")
+            if stopped and (
+                re.search(r"infinite_research\.py[^\n]*\b(evidence|revise|search|note|google-docs|google_docs)\b", command)
+                or re.search(r"google_docs_client\.py\b", command)
+            ):
+                return ("Blocked: research is stopped. Do not record new evidence/searches or edit Google Docs; "
+                        "reconcile the existing ledger and compile final reports.")
             chained_code_write = code_paths and re.search(
-                r"(?:\brm\b|\bmv\b|\bcp\b|\btruncate\b|\bshred\b|\bunlink\b|\bchmod\b|\bchown\b|\bdd\b|\bsed\s+-i|\btee\b|>{1,2})[^;|&]*infinite_(?:research|state|guard)\.py",
+                r"(?:\brm\b|\bmv\b|\bcp\b|\btruncate\b|\bshred\b|\bunlink\b|\bchmod\b|\bchown\b|\bdd\b|\bsed\s+-i|\btee\b|>{1,2})[^;|&]*(?:infinite_(?:research|state|guard)|google_docs_client)\.py",
                 command,
             )
             if WRITE_VERB.search(command) and (write_paths or chained_code_write):
@@ -647,7 +672,7 @@ def research_protected_reason(tool_name: str, tool_input: dict, project: Path, p
 
 
 def cmd_pretool(payload: dict, project: Path, policy: dict | None = None) -> int:
-    if not (project / GUARD_DIR).exists() and not enforcement_installed(project):
+    if policy is None and not (project / GUARD_DIR).exists() and not enforcement_installed(project, policy):
         return emit_allow()  # enforcement not installed here: nothing to protect
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
@@ -681,7 +706,9 @@ TASK_VERB = re.compile(
 )
 
 
-def enforcement_installed(project: Path) -> bool:
+def enforcement_installed(project: Path, policy: dict | None = None) -> bool:
+    if policy is not None or os.environ.get("PLUGIN_ROOT"):
+        return True
     if (project / GUARD_DIR).is_dir():
         return True
     try:
@@ -692,7 +719,7 @@ def enforcement_installed(project: Path) -> bool:
 
 def cmd_userprompt(payload: dict, project: Path, policy: dict | None = None) -> int:
     message = str(payload.get("message") or payload.get("prompt") or payload.get("content") or "")
-    if not message or not enforcement_installed(project):
+    if not message or not enforcement_installed(project, policy):
         return emit_allow()
 
     words = len(message.split())
@@ -742,7 +769,7 @@ def cmd_userprompt(payload: dict, project: Path, policy: dict | None = None) -> 
             {"ts": now(), "event": "disarm", "source": "user_message", "message": message[:200]},
         )
         return emit_allow("Infinite mode disarmed by the user's stop message.")
-    arm_explicit = bool(re.search(r"(^|\s)/(infinite|forever|never-stop)\b", message, re.I))
+    arm_explicit = bool(re.search(r"(^|\s)/(infinite(?::infinite)?|forever|never-stop)\b", message, re.I))
     if (words <= MAX_COMMAND_WORDS and hit(ARM_PATTERNS) and not negated_fixed) or arm_explicit or research_arm or fixed_invocation or fixed_resume:
         (project / GUARD_DIR).mkdir(parents=True, exist_ok=True)
         (project / GUARD_DIR / "DISARMED").unlink(missing_ok=True)

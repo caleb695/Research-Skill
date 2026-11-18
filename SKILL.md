@@ -1,4 +1,7 @@
----\nname: ai-infinite-skill\ndescription: >-\n  Repository entry point for a single-purpose Infinite skill. Use when the user
+---
+name: ai-infinite-skill
+description: >-
+  Repository entry point for a single-purpose Infinite skill. Use when the user
   says "use this skill", "use infinite", "use the infinite skill", or "/infinite".
   It runs one fixed bundled Book of Mormon evidence-research prompt without
   requiring task arguments: source authentication, context/POV checks, alternating
@@ -11,11 +14,12 @@ triggers:
 - use infinite skill
 - use infinite
 - /infinite
+- indefinitely research
 license: MIT
 compatibility: OpenHands Cloud, Agent Canvas, CLI, SDK, Claude Code, and Agent Skills clients. Canonical package is infinite/; project discovery launcher is .agents/skills/infinite/SKILL.md.
 metadata:
   author: caleb695
-  version: "1.3.0"
+  version: "1.3.1"
   canonical: infinite/SKILL.md
 ---
 
@@ -60,10 +64,12 @@ limits are checkpoint/resume boundaries, not permission to fabricate progress or
 override the user.
 
 Google Docs integration allows viewing and editing Google Docs via
-`infinite/scripts/google_docs_client.py`. Credentials must be placed in
-`.google/credentials.json` or specified via `GOOGLE_APPLICATION_CREDENTIALS`. All
-Google Doc operations are logged in the append-only ledger as search/note events
-and must be authenticated, contextualized, and scored like any other evidence.
+`infinite/scripts/infinite_research.py --dir . google-docs ...` (or
+`infinite/scripts/google_docs_client.py`). Credentials may be placed in `.google`
+or `.google/credentials.json`, or supplied via `GOOGLE_APPLICATION_CREDENTIALS`
+or `GOOGLE_SERVICE_ACCOUNT_JSON`. All Google Doc operations are logged in the
+append-only ledger as search/note events, respect `STOP_REQUESTED`, and must be
+authenticated, contextualized, and scored like any other evidence.
 
 ## Resources
 

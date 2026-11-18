@@ -146,8 +146,8 @@ def main() -> int:
             print(f"  ok   resource dir '{resource}/' is a standard AgentSkills directory")
     # OpenHands only reads scripts/, references/ and assets/ as resources; other
     # directories inside a skill are inert (it loads SKILL.md dirs, not their
-    # contents). `commands/` is part of the Claude plugin layout we also ship.
-    inert_allowed = {"commands"}
+    # contents). `commands/` and `hooks/` are part of the OpenHands/Claude plugin layout.
+    inert_allowed = {"commands", "hooks"}
     unexpected = [
         d.name
         for d in SKILL_DIR.iterdir()
@@ -260,6 +260,36 @@ def main() -> int:
         shim_text = shim.read_text(encoding="utf-8")
         check("$ARGUMENTS" not in shim_text, "command shim does not substitute arguments as the task")
         check("fixed-task.md" in shim_text, "command shim points to the fixed prompt")
+
+    print("== Cloud plugin manifests & pre-wired standby hooks ==")
+    for label, plugin_root in (("infinite/", SKILL_DIR), ("repo root", REPO)):
+        for mdir in (".plugin", ".claude-plugin"):
+            manifest = plugin_root / mdir / "plugin.json"
+            check(manifest.is_file(), f"{label} has {mdir}/plugin.json")
+            if manifest.is_file():
+                mdata = json.loads(manifest.read_text(encoding="utf-8"))
+                check(mdata.get("name") == "infinite", f"{label} {mdir}/plugin.json name is 'infinite'")
+                check(bool(mdata.get("description")), f"{label} {mdir}/plugin.json has description")
+        phooks = plugin_root / "hooks" / "hooks.json"
+        check(phooks.is_file(), f"{label} has hooks/hooks.json for Cloud plugin launch")
+        if phooks.is_file():
+            pdata = json.loads(phooks.read_text(encoding="utf-8"))
+            check(set(pdata) <= HOOK_EVENT_FIELDS, f"{label} plugin hooks use valid event keys")
+            for ev in ("stop", "pre_tool_use", "user_prompt_submit"):
+                cmd = pdata.get(ev, [{}])[0].get("hooks", [{}])[0].get("command", "")
+                check("${PLUGIN_ROOT}" in cmd and "--policy" in cmd, f"{label} plugin '{ev}' uses ${{PLUGIN_ROOT}} + --policy")
+
+    repo_hooks = REPO / ".openhands" / "hooks.json"
+    check(repo_hooks.is_file(), "repo ships pre-wired .openhands/hooks.json for Cloud workspaces")
+    if repo_hooks.is_file():
+        rdata = json.loads(repo_hooks.read_text(encoding="utf-8"))
+        check(set(rdata) <= HOOK_EVENT_FIELDS, "repo .openhands/hooks.json uses valid event keys")
+        rcmd = rdata.get("stop", [{}])[0].get("hooks", [{}])[0].get("command", "")
+        check(rcmd.startswith("bash .openhands/hooks/") and "--policy" in rcmd, "repo Stop hook is portable + carries policy")
+        rpol = json.loads(__import__("base64").urlsafe_b64decode(rcmd.split("--policy ", 1)[1].strip("'") + "==="))
+        check(rpol.get("mode") == "standby" and rpol.get("profile") == "book-of-mormon",
+              "repo pre-wired hooks default to standby book-of-mormon mode")
+    check((REPO / ".openhands" / "setup.sh").is_file(), "repo ships .openhands/setup.sh for Cloud sandboxes")
 
     project = Path(args.project).resolve() if args.project else None
     if project is None:

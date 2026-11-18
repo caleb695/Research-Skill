@@ -56,9 +56,11 @@ bash infinite/scripts/install-openhands-hooks.sh --dir . --install-skill --no-ar
 ```
 
 The canonical package installs to `.agents/skills/infinite/`. OpenHands Cloud can
-also load `infinite/` directly as a Git-hosted skill/plugin; this repository ships
-a project launcher at `.agents/skills/infinite/SKILL.md` for workspace discovery.
-Hook commands are repo-relative so a Cloud checkout path does not break them.
+use this repository directly (standby hooks are pre-wired in `.openhands/hooks.json`),
+load `infinite/` (or the repo root) as a Git-hosted plugin with bundled
+`hooks/hooks.json` (`${PLUGIN_ROOT}`), or import `infinite/` via `/add-skill`.
+Hook commands are repo-relative or `${PLUGIN_ROOT}`-scoped so Cloud checkout and
+cache paths never break them.
 
 ## Use
 

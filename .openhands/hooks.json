@@ -1,0 +1,35 @@
+{
+  "stop": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "command": "bash .openhands/hooks/infinite-stop.sh --policy eyJhcm1lZF9hdCI6IjIwMjYtMTEtMTFUMTY6Mzg6MDkrMDA6MDAiLCJnYXRlcyI6W10sIm1vZGUiOiJzdGFuZGJ5IiwicHJvZmlsZSI6ImJvb2stb2YtbW9ybW9uIiwicmVxdWlyZV9yb3VuZHMiOjEsInYiOjJ9",
+          "timeout": 60
+        }
+      ]
+    }
+  ],
+  "pre_tool_use": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "command": "bash .openhands/hooks/infinite-pretool.sh --policy eyJhcm1lZF9hdCI6IjIwMjYtMTEtMTFUMTY6Mzg6MDkrMDA6MDAiLCJnYXRlcyI6W10sIm1vZGUiOiJzdGFuZGJ5IiwicHJvZmlsZSI6ImJvb2stb2YtbW9ybW9uIiwicmVxdWlyZV9yb3VuZHMiOjEsInYiOjJ9",
+          "timeout": 20
+        }
+      ]
+    }
+  ],
+  "user_prompt_submit": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "command": "bash .openhands/hooks/infinite-userprompt.sh --policy eyJhcm1lZF9hdCI6IjIwMjYtMTEtMTFUMTY6Mzg6MDkrMDA6MDAiLCJnYXRlcyI6W10sIm1vZGUiOiJzdGFuZGJ5IiwicHJvZmlsZSI6ImJvb2stb2YtbW9ybW9uIiwicmVxdWlyZV9yb3VuZHMiOjEsInYiOjJ9",
+          "timeout": 15
+        }
+      ]
+    }
+  ]
+}
